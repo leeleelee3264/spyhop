@@ -1124,6 +1124,9 @@ def serve():
                 page = open(PANEL, encoding='utf-8').read().replace('</style>', THEME_CSS + '</style>', 1) \
                     .replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1)
                 return self.send(200, page.encode(), 'text/html; charset=utf-8')
+            if u.path == '/metrics':
+                return self.send(200, json.dumps({'samples': METRICS, 'cores': os.cpu_count(), 'every': refresh_sec(),
+                                                  'summarizer': summarizer_name(current_summarizer())}).encode(), 'application/json')
             if u.path == '/config':
                 return self.send(200, json.dumps({'summarizer': current_summarizer(), 'options': summarizers(), 'theme': current_theme()}).encode(), 'application/json')
             if u.path == '/state.json':
@@ -1262,7 +1265,27 @@ def watch():
                 last_seen = time.time()
         except Exception as e:
             sys.stderr.write('board: %s\n' % e)
+        sample_metrics()
         time.sleep(refresh_sec())
+
+
+METRICS = []          # 최근 60개 [시각, CPU %(맥 전체 대비), 메모리 MB]
+_LAST = {}
+
+
+def sample_metrics():
+    import resource
+    me, kids = resource.getrusage(resource.RUSAGE_SELF), resource.getrusage(resource.RUSAGE_CHILDREN)
+    cpu, now = me.ru_utime + me.ru_stime + kids.ru_utime + kids.ru_stime, time.time()
+    try:
+        rss = int(subprocess.run(['ps', '-o', 'rss=', '-p', str(os.getpid())], capture_output=True, text=True).stdout.strip()) / 1024
+    except ValueError:
+        rss = 0
+    if _LAST:
+        pct = (cpu - _LAST['cpu']) / max(now - _LAST['t'], 1e-6) / (os.cpu_count() or 1) * 100
+        METRICS.append([round(now), round(pct, 2), round(rss, 1)])
+        del METRICS[:-60]
+    _LAST.update(cpu=cpu, t=now)
 
 
 def main(argv):
@@ -1350,7 +1373,11 @@ def render_settings():
             '<h4>Display</h4><label class="opt tog"><input type="checkbox"%s onchange="setCfg({orcas:this.checked})">'
             '<span><b>Orca animation</b><small>Orcas spyhop out of the waves in the header now and then</small></span></label>'
             '<h4>Updates</h4><div class="seg2"><span>Update every</span>%s</div>'
-            '<p class="hint">Longer intervals use less CPU and fewer model calls.</p></div></div>'
+            '<p class="hint">Longer intervals use less CPU and fewer model calls.</p>'
+            '<h4>Resource usage</h4><div class="mets"><div class="met"><span>CPU</span><b id="mcpu">–</b><svg id="scpu" viewBox="0 0 120 28" preserveAspectRatio="none"></svg>'
+            '<small>share of all cores, incl. orca and model calls</small></div>'
+            '<div class="met"><span>Memory</span><b id="mmem">–</b><svg id="smem" viewBox="0 0 120 28" preserveAspectRatio="none"></svg>'
+            '<small>board process</small></div></div><p class="hint" id="mnote"></p></div></div>'
             % (sums, cards, ' checked' if orcas_on() else '',
                pills('refresh', REFRESH_OPTS, refresh_sec(), lambda v: '%ds' % v)))
 
@@ -1525,7 +1552,7 @@ border-radius:12px;padding:10px;gap:8px;flex-wrap:wrap;align-items:center;box-sh
 ::-webkit-scrollbar-corner{background:transparent}
 
 header{position:relative;overflow:hidden}.brand .tag{font-style:normal;font-size:11px;font-weight:500;color:var(--ink3);margin-left:6px}.sea{position:absolute;left:0;right:0;bottom:0;height:44px;pointer-events:none;overflow:hidden}.sea:after{content:"";position:absolute;left:0;right:0;bottom:2px;height:6px;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2232%22%20height%3D%226%22%20viewBox%3D%220%200%2032%206%22%3E%3Cpath%20d%3D%22M0%203%20Q4%200.5%208%203%20T16%203%20T24%203%20T32%203%22%20fill%3D%22none%22%20stroke%3D%22%23cbd5e1%22%20stroke-width%3D%221.4%22/%3E%3C/svg%3E") repeat-x;opacity:.7}.orca{position:absolute;bottom:-1px;width:36px;height:36px;transform:translateY(100%);animation:spy 3.4s ease-in-out forwards}@keyframes spy{0%{transform:translateY(100%) rotate(-8deg)}28%{transform:translateY(6%) rotate(0)}72%{transform:translateY(6%) rotate(4deg)}100%{transform:translateY(100%) rotate(-4deg)}}@media (prefers-reduced-motion:reduce){.orca{display:none}}
-.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.side{background:var(--side)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.sel{font:inherit;font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:280px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:4px 11px;font-size:11.5px;color:var(--ink2)}.pills button+button{border-left:1px solid var(--line)}.pills button.on{background:color-mix(in srgb,var(--wait) 14%,var(--card));color:var(--ink);font-weight:700}.ths{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:7px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:74px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
+.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.side{background:var(--side)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.mets{display:grid;grid-template-columns:1fr 1fr;gap:10px}.met{border:1px solid var(--line);border-radius:8px;padding:9px 11px;display:grid;grid-template-columns:auto 1fr;align-items:center;column-gap:8px;color:var(--wait)}.met span{font-size:11px;color:var(--ink3);grid-column:1/3}.met b{font-size:20px;color:var(--ink)}.met svg{width:100%;height:28px}.met small{grid-column:1/3;font-size:10.5px;color:var(--ink3)}.sel{font:inherit;font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:280px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:4px 11px;font-size:11.5px;color:var(--ink2)}.pills button+button{border-left:1px solid var(--line)}.pills button.on{background:color-mix(in srgb,var(--wait) 14%,var(--card));color:var(--ink);font-weight:700}.ths{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:7px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:74px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
 <div id="dropbar"></div>
 <div id="mconfirm"><div class="cb"><h3>Move to another workspace?</h3><p><b id="mvt"></b><br><br>
 Closes this pane and resumes the same conversation in a split next to the target workspace. The transcript is kept.</p>
@@ -1568,6 +1595,17 @@ function tog(li){var done=!li.classList.contains('done');
   var em=li.querySelector('em:not(.me)');if(em)em.remove();
   fetch('http://127.0.0.1:47613/toggle',{method:'POST',body:JSON.stringify({log:li.dataset.log,label:li.dataset.label,done:done})})
   .catch(function(){toast('Board server is not running; not saved')})}
+function spark(id,vals){var e=document.getElementById(id);if(!e||!vals.length)return;var mx=Math.max.apply(null,vals)||1,n=vals.length;
+  var pts=vals.map(function(v,i){return (n<2?120:i*120/(n-1)).toFixed(1)+','+(26-v/mx*24).toFixed(1)}).join(' ');
+  e.innerHTML='<polyline points="'+pts+'" fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke"/>'}
+function loadMetrics(){if(location.hash!=='#settings')return;fetch('http://127.0.0.1:47613/metrics').then(function(r){return r.json()}).then(function(d){
+  var s=d.samples||[];if(!s.length){document.getElementById('mnote').textContent='Collecting… first numbers after two updates.';return}
+  var last=s[s.length-1],avg=s.reduce(function(a,x){return a+x[1]},0)/s.length;
+  document.getElementById('mcpu').textContent=last[1].toFixed(1)+'%';document.getElementById('mmem').textContent=Math.round(last[2])+' MB';
+  spark('scpu',s.map(function(x){return x[1]}));spark('smem',s.map(function(x){return x[2]}));
+  document.getElementById('mnote').textContent='Last '+(s.length*d.every<60?s.length*d.every+' s':Math.round(s.length*d.every/60)+' min')+' · average CPU '+avg.toFixed(1)+'% of '+d.cores+' cores · summarizer: '+d.summarizer})
+  .catch(function(){})}
+loadMetrics();setInterval(loadMetrics,5000);addEventListener('hashchange',loadMetrics);
 function setCfg(o,btn){if(btn){btn.parentNode.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',b===btn)})}
   fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify(o)})
   .then(function(r){toast(r.ok?'Saved':'Could not save');if(r.ok&&'orcas' in o){var s=document.querySelector('.sea');if(s)s.style.display=o.orcas?'':'none'}})
