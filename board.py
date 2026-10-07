@@ -1026,7 +1026,17 @@ def render(t, steps, manual, ws):
     return order, card, modal
 
 
+import threading
+BUILD_LOCK = threading.Lock()
+
+
 def build():
+    """보드 한 장을 그린다. 감시 루프와 설정 저장이 동시에 부를 수 있어 한 번에 하나만 돌게 한다."""
+    with BUILD_LOCK:
+        return _build()
+
+
+def _build():
     worktrees = {w['id']: w for w in orca('worktree', 'list')['worktrees']}
     LIST_CACHE['list'] = orca('terminal', 'list')
     LIST_CACHE['stamp'] = {t['handle']: t.get('lastOutputAt') for t in LIST_CACHE['list']['terminals']}
@@ -1250,6 +1260,10 @@ def serve():
                     if req['summarizer'] not in [m['id'] for p in summarizers() for m in p['models']]:
                         return self.send(400, b'unavailable')
                     save_config(summarizer=req['summarizer'])
+                try:
+                    build()
+                except Exception as e:
+                    sys.stderr.write('rebuild after config: %s\n' % e)
                 return self.send(200, b'saved')
             if urlparse(self.path).path == '/toggle':
                 try:
@@ -1544,7 +1558,7 @@ def render_settings():
             + sec('Theme', '', '<div class="ths">%s</div>' % cards)
             + sec('Group by', 'Orca workspaces, or topics the AI picks' if find_bin('orca') else 'Topics the AI picks (Orca not found)',
                   '<div class="pills">%s</div>' % ''.join(
-                      '<button class="%s"%s onclick="setCfg({group_by:\'%s\'},this);setTimeout(function(){location.reload()},600)">%s</button>'
+                      '<button class="%s"%s onclick="setCfg({group_by:\'%s\'},this).then(function(){location.reload()})">%s</button>'
                       % ('on' if group_mode() == k else '', '' if (k == 'ai' or find_bin('orca')) else ' disabled', k, label)
                       for k, label in (('orca', 'Orca workspace'), ('ai', 'AI topics'))))
             + sec('Orca animation', 'Orcas spyhop in the header',
@@ -1784,7 +1798,7 @@ function loadMetrics(){if(location.hash!=='#settings')return;fetch('http://127.0
   .catch(function(){})}
 loadMetrics();setInterval(loadMetrics,5000);addEventListener('hashchange',loadMetrics);
 function setCfg(o,btn){if(btn){btn.parentNode.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',b===btn)})}
-  fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify(o)})
+  return fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify(o)})
   .then(function(r){toast(r.ok?'Saved':'Could not save');if(r.ok&&'orcas' in o){var s=document.querySelector('.sea');if(s)s.style.display=o.orcas?'':'none'}})
   .catch(function(){toast('Board server is not running')})}
 function setTheme(t){document.documentElement.dataset.theme=t;
