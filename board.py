@@ -84,34 +84,90 @@ def save_config(**kw):
 
 
 _SUMS = {}
+# Claude CLI 는 모델 목록을 주는 명령이 없다. 지금 나와 있는 모델 + 이 맥의 대화 기록에 실제로 쓰인 모델을 합친다
+CLAUDE_KNOWN = ['claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1']
+PROVIDER_NOTE = {
+    'deepseek': 'Fast (~6s per session). Transcripts go to DeepSeek.',
+    'claude': 'Uses your Claude login (~15-60s per session). Transcripts stay with Anthropic.',
+    'codex': 'Uses your Codex login (~15s+ per session). Transcripts go to OpenAI.',
+}
 
 
 def summarizers():
-    """이 맥에서 실제로 쓸 수 있는 요약 모델만 돌려준다 (1분 캐시)."""
-    if time.time() - _SUMS.get('at', 0) < 60:
+    """이 맥에서 실제로 쓸 수 있는 요약 모델을 제공자별로 돌려준다 (10분 캐시).
+    [{'id': 'claude', 'label': 'Claude (claude CLI)', 'models': [{'id': 'claude:claude-opus-5-5', 'name': 'Opus 5.5'}, ...]}, ...]"""
+    if time.time() - _SUMS.get('at', 0) < 600:
         return _SUMS['list']
     _SUMS['list'], _SUMS['at'] = _find_summarizers(), time.time()
     return _SUMS['list']
 
 
+def _claude_models():
+    seen = set(CLAUDE_KNOWN)
+    files = sorted(glob.glob(os.path.expanduser('~/.claude/projects/*/*.jsonl')), key=os.path.getmtime)[-40:]
+    for f in files:
+        try:
+            with open(f, 'rb') as fh:
+                fh.seek(max(0, os.path.getsize(f) - 200000))
+                seen.update(m.decode() for m in re.findall(rb'"model":"(claude-[a-z0-9-]+)"', fh.read()))
+        except OSError:
+            pass
+    tier = {'haiku': 0, 'sonnet': 1, 'opus': 2, 'fable': 3}
+    def key(m):
+        p = re.match(r'claude-([a-z]+)-(\d+)-(\d+)', m)
+        return (tier.get(p.group(1), 9), -int(p.group(2)), -int(p.group(3))) if p else (9, 0, 0)
+    # 같은 이름(예: Haiku 4.5)이 여러 개면 하나만
+    out, names = [], set()
+    for m in sorted(seen, key=key):
+        name = pretty_model(m)
+        if re.match(r'claude-[a-z]+-\d+-\d+', m) and name not in names:
+            names.add(name)
+            out.append({'id': 'claude:' + m, 'name': name})
+    return out
+
+
+def _codex_models():
+    try:
+        with open(os.path.expanduser('~/.codex/models_cache.json'), encoding='utf-8') as f:
+            ms = json.load(f).get('models') or []
+    except (OSError, ValueError):
+        return [{'id': 'codex:', 'name': 'Codex default'}]
+    ms = sorted((m for m in ms if m.get('visibility') == 'list'), key=lambda m: m.get('priority', 99))
+    return [{'id': 'codex:' + m['slug'], 'name': m.get('display_name') or m['slug']} for m in ms] or [{'id': 'codex:', 'name': 'Codex default'}]
+
+
 def _find_summarizers():
-    has_key = subprocess.run(['security', 'find-generic-password', '-s', 'deepseek-api'],
-                             capture_output=True).returncode == 0
-    return [s for s in (
-        {'id': 'deepseek', 'label': 'DeepSeek (API)', 'ok': has_key},
-        {'id': 'claude-haiku', 'label': 'Claude Haiku (claude CLI)', 'ok': bool(find_bin('claude'))},
-        {'id': 'codex', 'label': 'Codex (codex CLI)', 'ok': bool(find_bin('codex'))},
-    ) if s['ok']]
+    out = []
+    if subprocess.run(['security', 'find-generic-password', '-s', 'deepseek-api'], capture_output=True).returncode == 0:
+        out.append({'id': 'deepseek', 'label': 'DeepSeek (API)', 'models': [{'id': 'deepseek:' + MODEL, 'name': pretty_model(MODEL)}]})
+    if find_bin('claude'):
+        out.append({'id': 'claude', 'label': 'Claude (claude CLI)', 'models': _claude_models()})
+    if find_bin('codex'):
+        out.append({'id': 'codex', 'label': 'Codex (codex CLI)', 'models': _codex_models()})
+    return out
+
+
+OLD_IDS = {'deepseek': 'deepseek:' + MODEL, 'claude-haiku': 'claude:claude-haiku-4-5-20251001', 'codex': 'codex:'}
 
 
 def current_summarizer():
-    opts = [s['id'] for s in summarizers()]
+    """'제공자:모델' 문자열. 저장된 값이 지금 못 쓰는 것이면 첫 번째 쓸 수 있는 모델로."""
+    ids = [m['id'] for p in summarizers() for m in p['models']]
     want = load_config().get('summarizer', 'deepseek')
-    return want if want in opts else (opts[0] if opts else 'deepseek')
+    want = OLD_IDS.get(want, want)
+    return want if want in ids else (ids[0] if ids else 'deepseek:' + MODEL)
 
 
-def claude_cli(system, user):
-    r = subprocess.run([find_bin('claude'), '-p', '--model', 'haiku', '--no-session-persistence',
+def summarizer_name(sid):
+    for p in summarizers():
+        for m in p['models']:
+            if m['id'] == sid:
+                return m['name']
+    return sid
+
+
+def claude_cli(system, user, model):
+    r = subprocess.run([find_bin('claude'), '-p', '--model', model, '--no-session-persistence',
                         '--system-prompt', system, '--output-format', 'text',
                         '--disallowedTools', 'Bash,Read,Write,Edit,MultiEdit,Glob,Grep,WebFetch,WebSearch,Task,NotebookEdit'],
                        input=user, capture_output=True, text=True, timeout=300, cwd=BASE)
@@ -120,24 +176,24 @@ def claude_cli(system, user):
     return r.stdout
 
 
-def codex_cli(system, user):
+def codex_cli(system, user, model):
     import tempfile
     with tempfile.NamedTemporaryFile('r', suffix='.txt', dir=BASE) as out:
         r = subprocess.run([find_bin('codex'), 'exec', '--ephemeral', '--skip-git-repo-check', '-s', 'read-only',
-                            '--color', 'never', '-o', out.name,
-                            system + '\n\n도구나 명령을 쓰지 말고, 아래 <stdin> 의 내용만 읽고 바로 JSON 으로 답하라.'],
+                            '--color', 'never', '-o', out.name] + (['-m', model] if model else []) +
+                           [system + '\n\n도구나 명령을 쓰지 말고, 아래 <stdin> 의 내용만 읽고 바로 JSON 으로 답하라.'],
                            input=user, capture_output=True, text=True, timeout=300, cwd=BASE)
         if r.returncode:
             raise RuntimeError('codex: ' + (r.stderr or r.stdout)[-200:])
         return out.read()
 
 
-def llm(system, user):
-    which = current_summarizer()
-    if which == 'claude-haiku':
-        return claude_cli(system, user)
-    if which == 'codex':
-        return codex_cli(system, user)
+def llm(system, user, sid=None):
+    provider, _, model = (sid or current_summarizer()).partition(':')
+    if provider == 'claude':
+        return claude_cli(system, user, model)
+    if provider == 'codex':
+        return codex_cli(system, user, model)
     return deepseek(system, user)
 
 PROMPT = '''아래는 한 AI 코딩 세션의 대화 기록이다 (U=사용자, A=AI). 사용자는 목표 하나를 정해 두지 않고, 한 세션에서 일을 하나 끝내면 다음 일을 맡기는 식으로 쓴다. 이 세션에서 맡긴 일들을 JSON 하나로만 출력하라. 설명·코드블록 없이 JSON 만.
@@ -311,7 +367,7 @@ def summarize(path):
         else:
             body = '<기록>\n%s\n</기록>\n\n위 기록을 지시한 JSON 하나로만 출력하라.' % mask(transcript(path))
         by = current_summarizer()
-        out = llm(PROMPT, body)
+        out = llm(PROMPT, body, by)
         data = json.JSONDecoder().raw_decode(out[out.index('{'):])[0]  # JSON 뒤에 붙은 말은 버린다
         items = [{'label': str(i.get('label', ''))[:20],
                   'state': i.get('state') if i.get('state') in STATES else 'open',
@@ -1039,7 +1095,7 @@ def build():
 
 
 PORT = 47613
-SEA = '<div class="sea" aria-hidden="true"></div><script>(function(){var sea=document.querySelector(".sea");if(!sea)return;function fitSea(){var h=sea.parentNode.getBoundingClientRect(),a=document.querySelector(".brand").getBoundingClientRect().right-h.left+16,b=h.right-document.querySelector(".tiles").getBoundingClientRect().left+16;sea.style.left=a+"px";sea.style.right=b+"px"}fitSea();addEventListener("resize",fitSea);function pop(){var o=document.createElement("div");o.className="orca";o.innerHTML=\'<svg viewBox="0 0 32 32" width="100%" height="100%"><path d="M9.6 31 C9 23 9.8 15.6 12 10.2 C13.4 6.8 15.2 4.6 16.9 4.4 C18.7 4.3 20 6.2 20.8 9.2 C22 13.6 22.5 20 22.6 31 Z" fill="#334155"/><ellipse cx="23.6" cy="24.2" rx="2.8" ry="1.1" transform="rotate(-28 23.6 24.2)" fill="#334155"/><g fill="#ffffff"><ellipse cx="18.4" cy="12.2" rx="1.25" ry="3.1" transform="rotate(-12 18.4 12.2)"/><path d="M12.4 9.6 C11.1 13.4 10.4 19 10.6 26 L14.6 26 C14 20.2 13.7 14.8 13.9 7.6 C13.3 8.2 12.8 8.9 12.4 9.6 Z"/></g></svg>\';var w=sea.getBoundingClientRect().width-36;if(w<=0)return;o.style.left=(Math.random()*w)+"px";var k=.75+Math.random()*.5;o.style.width=o.style.height=(36*k)+"px";sea.appendChild(o);setTimeout(function(){o.remove()},3600)}setTimeout(pop,500+Math.random()*4000);if(Math.random()<.5)setTimeout(pop,4500+Math.random()*4500)})()</script>'  # 헤더 아래에서 가끔 범고래가 고개를 내민다
+SEA = '<div class="sea" aria-hidden="true"></div><script>(function(){var sea=document.querySelector(".sea");if(!sea)return;function fitSea(){var h=sea.parentNode.getBoundingClientRect(),a=document.querySelector(".brand").getBoundingClientRect().right-h.left+16,b=h.right-document.querySelector(".tiles").getBoundingClientRect().left+16;sea.style.left=a+"px";sea.style.right=b+"px"}fitSea();addEventListener("resize",fitSea);function pop(){var o=document.createElement("div");o.className="orca";o.innerHTML=\'<svg viewBox="0 0 32 32" width="100%" height="100%"><path d="M9.6 31 C9 23 9.8 15.6 12 10.2 C13.4 6.8 15.2 4.6 16.9 4.4 C18.7 4.3 20 6.2 20.8 9.2 C22 13.6 22.5 20 22.6 31 Z" fill="#334155"/><ellipse cx="23.6" cy="24.2" rx="2.8" ry="1.1" transform="rotate(-28 23.6 24.2)" fill="#334155"/><g fill="#ffffff"><ellipse cx="18.4" cy="12.2" rx="1.25" ry="3.1" transform="rotate(-12 18.4 12.2)"/><path d="M12.4 9.6 C11.1 13.4 10.4 19 10.6 26 L14.6 26 C14 20.2 13.7 14.8 13.9 7.6 C13.3 8.2 12.8 8.9 12.4 9.6 Z"/></g></svg>\';var w=sea.getBoundingClientRect().width-36;if(w<=0)return;o.style.left=(Math.random()*w)+"px";var k=.75+Math.random()*.5;o.style.width=o.style.height=(36*k)+"px";sea.appendChild(o);setTimeout(function(){o.remove()},3600)}setTimeout(pop,300+Math.random()*1500);(function loop(){setTimeout(function(){pop();loop()},2500+Math.random()*3000)})()})()</script>'  # 헤더 아래에서 가끔 범고래가 고개를 내민다
 PANEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'panel.html')
 
 
@@ -1098,7 +1154,7 @@ def serve():
                         return self.send(400, b'unknown theme')
                     save_config(theme=req['theme'])
                 if 'summarizer' in req:
-                    if req['summarizer'] not in [x['id'] for x in summarizers()]:
+                    if req['summarizer'] not in [m['id'] for p in summarizers() for m in p['models']]:
                         return self.send(400, b'unavailable')
                     save_config(summarizer=req['summarizer'])
                 return self.send(200, b'saved')
@@ -1275,16 +1331,13 @@ GEAR = ('<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="cur
         '2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051'
         'a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg>')
 
-SUM_NOTE = {'deepseek': 'Fast (~6s). Transcripts go to DeepSeek.',
-            'claude-haiku': 'Uses your Claude login (~15-60s). Transcripts stay with Anthropic.',
-            'codex': 'Uses your Codex login and its default model. Transcripts go to OpenAI.'}
-
-
 def render_settings():
     cur = current_summarizer()
-    sums = ''.join('<label class="opt"><input type="radio" name="sum" value="%s"%s onchange="setSum(this.value)">'
-                   '<span><b>%s</b><small>%s</small></span></label>'
-                   % (o['id'], ' checked' if o['id'] == cur else '', o['label'], SUM_NOTE.get(o['id'], '')) for o in summarizers())
+    groups = ''.join('<optgroup label="%s">%s</optgroup>' % (p['label'], ''.join(
+        '<option value="%s"%s>%s</option>' % (m['id'], ' selected' if m['id'] == cur else '', escape(m['name'])) for m in p['models']))
+        for p in summarizers())
+    sums = ('<select class="sel" onchange="setSum(this.value)">%s</select><p class="hint" id="sumnote">%s</p>'
+            '<script>var NOTES=%s;</script>' % (groups, PROVIDER_NOTE.get(cur.split(':')[0], ''), json.dumps(PROVIDER_NOTE)))
     th = current_theme()
     cards = ''.join('<button class="th%s" data-id="%s" onclick="setTheme(\'%s\')">'
                     '<div class="thp" data-theme="%s"><i class="t1"></i><div class="tc"><i class="tb"></i><i class="tl"></i>'
@@ -1293,7 +1346,7 @@ def render_settings():
     return ('<div class="modal" id="settings"><a class="bg" href="#"></a><div class="box set">'
             '<div class="row"><b class="stt">Settings</b><a class="x" href="#">Close ✕</a></div>'
             '<h4>Summarizer</h4><p class="hint">The model that writes titles, steps and TODOs. Only models available on this Mac are listed.</p>'
-            '<div class="opts">%s</div><h4>Theme</h4><div class="ths">%s</div>'
+            '<div>%s</div><h4>Theme</h4><div class="ths">%s</div>'
             '<h4>Display</h4><label class="opt tog"><input type="checkbox"%s onchange="setCfg({orcas:this.checked})">'
             '<span><b>Orca animation</b><small>Orcas spyhop out of the waves in the header now and then</small></span></label>'
             '<h4>Updates</h4><div class="seg2"><span>Update every</span>%s</div>'
@@ -1472,7 +1525,7 @@ border-radius:12px;padding:10px;gap:8px;flex-wrap:wrap;align-items:center;box-sh
 ::-webkit-scrollbar-corner{background:transparent}
 
 header{position:relative;overflow:hidden}.brand .tag{font-style:normal;font-size:11px;font-weight:500;color:var(--ink3);margin-left:6px}.sea{position:absolute;left:0;right:0;bottom:0;height:44px;pointer-events:none;overflow:hidden}.sea:after{content:"";position:absolute;left:0;right:0;bottom:2px;height:6px;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2232%22%20height%3D%226%22%20viewBox%3D%220%200%2032%206%22%3E%3Cpath%20d%3D%22M0%203%20Q4%200.5%208%203%20T16%203%20T24%203%20T32%203%22%20fill%3D%22none%22%20stroke%3D%22%23cbd5e1%22%20stroke-width%3D%221.4%22/%3E%3C/svg%3E") repeat-x;opacity:.7}.orca{position:absolute;bottom:-1px;width:36px;height:36px;transform:translateY(100%);animation:spy 3.4s ease-in-out forwards}@keyframes spy{0%{transform:translateY(100%) rotate(-8deg)}28%{transform:translateY(6%) rotate(0)}72%{transform:translateY(6%) rotate(4deg)}100%{transform:translateY(100%) rotate(-4deg)}}@media (prefers-reduced-motion:reduce){.orca{display:none}}
-.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.side{background:var(--side)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:4px 11px;font-size:11.5px;color:var(--ink2)}.pills button+button{border-left:1px solid var(--line)}.pills button.on{background:color-mix(in srgb,var(--wait) 14%,var(--card));color:var(--ink);font-weight:700}.ths{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:7px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:74px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
+.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.side{background:var(--side)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.sel{font:inherit;font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:280px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:4px 11px;font-size:11.5px;color:var(--ink2)}.pills button+button{border-left:1px solid var(--line)}.pills button.on{background:color-mix(in srgb,var(--wait) 14%,var(--card));color:var(--ink);font-weight:700}.ths{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:7px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:74px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
 <div id="dropbar"></div>
 <div id="mconfirm"><div class="cb"><h3>Move to another workspace?</h3><p><b id="mvt"></b><br><br>
 Closes this pane and resumes the same conversation in a split next to the target workspace. The transcript is kept.</p>
@@ -1522,7 +1575,8 @@ function setCfg(o,btn){if(btn){btn.parentNode.querySelectorAll('button').forEach
 function setTheme(t){document.documentElement.dataset.theme=t;
   document.querySelectorAll('.th').forEach(function(b){b.classList.toggle('on',b.dataset.id===t)});
   fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify({theme:t})}).catch(function(){toast('Board server is not running')})}
-function setSum(v){fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify({summarizer:v})})
+function setSum(v){var n=document.getElementById('sumnote');if(n)n.textContent=NOTES[v.split(':')[0]]||'';
+  fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify({summarizer:v})})
   .then(function(r){toast(r.ok?'Summarizer saved · applies from the next update':'That model is not available')})
   .catch(function(){toast('Board server is not running')})}
 function go(h){fetch('http://127.0.0.1:47613/switch?h='+encodeURIComponent(h),{mode:'no-cors'})

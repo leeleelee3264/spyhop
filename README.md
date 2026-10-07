@@ -30,11 +30,11 @@
 - Orca 와 `orca` CLI
 - 요약 모델 하나 이상. 보드 오른쪽 위 톱니바퀴(Settings)에서 고르며, 이 맥에서 실제로 쓸 수 있는 것만 보입니다. 고른 값은 `~/.spyhop/config.json` 에 저장됩니다.
 
-| 선택지 | 필요한 것 | 대화가 가는 곳 | 속도(세션 1개) |
+| 제공자 | 고를 수 있는 모델 | 필요한 것 | 대화가 가는 곳 |
 |---|---|---|---|
-| DeepSeek (API) | 키체인에 `deepseek-api` 키 | DeepSeek | 약 6초 |
-| Claude Haiku (claude CLI) | 로그인된 `claude` | Anthropic | 약 15~60초 |
-| Codex (codex CLI) | 로그인된 `codex` | OpenAI | 약 15초~ |
+| DeepSeek (API) | DeepSeek flash | 키체인에 `deepseek-api` 키 | DeepSeek |
+| Claude (claude CLI) | Haiku · Sonnet · Opus · Fable (현재 모델 + 이 맥 대화 기록에 쓰인 모델) | 로그인된 `claude` | Anthropic |
+| Codex (codex CLI) | `~/.codex/models_cache.json` 에 있는 모델 (GPT-6.1-Sol 등) | 로그인된 `codex` | OpenAI |
 
 ```bash
 # DeepSeek 키 등록
