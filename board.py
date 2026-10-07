@@ -362,7 +362,8 @@ def summarize(path):
             body = ('<이전 정리>\n%s\n</이전 정리>\n\n<새 기록>\n%s\n</새 기록>\n\n'
                     '이전 정리에 새 기록에서 일어난 진행만 반영해 같은 형식의 JSON 전체를 다시 출력하라. '
                     'title 은 그대로 둔다(새 기록에서 사용자가 이전 일을 끝내고 전혀 다른 큰 일을 새로 맡겼을 때만 바꾸고 "new_task": true 를 넣는다). '
-                    'done 단계·done 일은 이름과 내용을 바꾸지 않는다. summary·last_reply·needs_reply 는 새 기록 기준으로 고친다.'
+                    'done 단계·done 일은 이름과 내용을 바꾸지 않는다. 이전 정리의 left 단계가 새 기록에서 이미 끝났으면 done 으로, 더 이상 하지 않기로 했으면 빼고, '
+                    '아직 남아 있으면 그대로 left 로 둔다. summary·last_reply·needs_reply 는 새 기록 기준으로 고친다.'
                     % (json.dumps(prev, ensure_ascii=False), mask(transcript(path, base['pos']))))
         else:
             body = '<기록>\n%s\n</기록>\n\n위 기록을 지시한 JSON 하나로만 출력하라.' % mask(transcript(path))
@@ -383,9 +384,6 @@ def summarize(path):
             # 끝난 단계·끝난 일은 지난 정리 그대로 고정하고, 모델이 준 것 중 새 것만 뒤에 붙인다
             keep = [dict(f) for f in base.get('steps') or [] if f['state'] in ('done', 'side')]
             flow = keep + [f for f in flow if f['label'] not in {k['label'] for k in keep}]
-            # 지난번에 '예정'이던 단계를 모델이 말없이 빠뜨리면 다시 붙인다 (끝냈으면 모델이 done 으로 준다)
-            have = {f['label'] for f in flow}
-            flow += [dict(f, state='left') for f in base.get('steps') or [] if f['state'] == 'left' and f['label'] not in have]
             kept = [i for i in base.get('items') or [] if i['state'] == 'done']
             items = kept + [i for i in items if i['label'] not in {k['label'] for k in kept}]
         while len(flow) > 8:  # 넘치면 오래된 끝낸 단계부터 뺀다
