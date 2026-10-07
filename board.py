@@ -1087,7 +1087,7 @@ def serve():
         def do_POST(self):
             if urlparse(self.path).path == '/config':
                 req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
-                for key, allowed in (('refresh', REFRESH_OPTS), ('resummarize', RESUM_OPTS), ('orcas', (True, False))):
+                for key, allowed in (('refresh', REFRESH_OPTS), ('orcas', (True, False))):
                     if key in req:
                         if req[key] not in allowed:
                             return self.send(400, b'bad value')
@@ -1241,8 +1241,8 @@ CLASSIC_PREVIEW = ('.thp[data-theme="classic"]{--bg:#f4f5f8;--col:#ebecf0;--card
 THEME_CSS = CLASSIC_PREVIEW + ''.join('[data-theme="%s"]{%s}' % (tid, ';'.join('--%s:%s' % kv for kv in v.items())) for tid, _, v in THEMES if v)
 
 
-REFRESH_OPTS = (10, 30, 60)          # 보드를 다시 그리는 주기(초)
-RESUM_OPTS = (60, 180, 300)          # 세션 하나를 다시 정리하는 최소 간격(초)
+REFRESH_OPTS = (10, 30, 60)          # 보드를 다시 그리는 주기(초). 설정은 이것 하나만 둔다
+RESUM_FOR = {10: 60, 30: 180, 60: 300}  # 주기에 맞춰 세션 재정리 최소 간격(초)을 정한다
 
 
 def opt(key, allowed, default):
@@ -1255,7 +1255,7 @@ def refresh_sec():
 
 
 def resum_sec():
-    return opt('resummarize', RESUM_OPTS, 60)
+    return RESUM_FOR[refresh_sec()]
 
 
 def orcas_on():
@@ -1293,12 +1293,10 @@ def render_settings():
             '<div class="opts">%s</div><h4>Theme</h4><div class="ths">%s</div>'
             '<h4>Display</h4><label class="opt tog"><input type="checkbox"%s onchange="setCfg({orcas:this.checked})">'
             '<span><b>Orca animation</b><small>Orcas spyhop out of the waves in the header now and then</small></span></label>'
-            '<h4>Updates</h4><div class="seg2"><span>Refresh board every</span>%s</div>'
-            '<div class="seg2"><span>Re-summarize a session at most every</span>%s</div>'
+            '<h4>Updates</h4><div class="seg2"><span>Update every</span>%s</div>'
             '<p class="hint">Longer intervals use less CPU and fewer model calls.</p></div></div>'
             % (sums, cards, ' checked' if orcas_on() else '',
-               pills('refresh', REFRESH_OPTS, refresh_sec(), lambda v: '%ds' % v),
-               pills('resummarize', RESUM_OPTS, resum_sec(), lambda v: '%d min' % (v // 60))))
+               pills('refresh', REFRESH_OPTS, refresh_sec(), lambda v: '%ds' % v)))
 
 
 def pills(key, values, cur, fmt):
