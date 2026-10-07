@@ -1065,10 +1065,16 @@ def _build():
             steps = dict(zip(logs, ex.map(summarize, logs)))
 
     mode = group_mode()
+    grouping = ''
     if mode == 'ai':
         assign_groups([(t.get('log') or t['handle'], (steps.get(t.get('log')) or {}).get('title'),
                         (steps.get(t.get('log')) or {}).get('summary')) for t in terms])
         gorder = load_groups()['groups']
+        waiting = sum(1 for t in terms if group_of(t.get('log') or t['handle']) == UNSORTED)
+        if waiting:
+            grouping = ('<div id="grouping"><i class="donut"></i>Grouping %d session%s by topic…</div>'
+                        '<script>setTimeout(function(){if(!location.hash||location.hash===\'#\')location.reload()},2500)</script>'
+                        % (waiting, '' if waiting == 1 else 's'))
     cols, modals, count = {}, [], {'wait': 0, 'busy': 0}
     for t in sorted(terms, key=lambda x: -(x.get('lastOutputAt') or 0)):
         w = worktrees.get(t['worktreeId'], {})
@@ -1102,7 +1108,7 @@ def _build():
     # 헤더는 한 줄: 로고·이름 | (범고래 물결) | 숫자 두 개 · 설정. 범례와 갱신 시각은 오른쪽 아래로 뺀다
     head = ('<div class="brand"><b>Spyhop</b><em class="tag">all your AI sessions at a glance</em></div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' % tiles
             + GEAR + '</a></div>' + (SEA if orcas_on() else ''))
-    foot = '<div class="subbar">%s<small>updated %s</small></div>' % (legend, time.strftime('%H:%M:%S'))
+    foot = '<div class="subbar">%s%s<small>updated %s</small></div>' % (grouping, legend, time.strftime('%H:%M:%S'))
     html = TEMPLATE.replace('__LOADER__', 'file://' + LOADER).replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
         .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', foot + '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals) + render_settings()))
     os.makedirs(BASE, exist_ok=True)
@@ -1247,6 +1253,8 @@ def serve():
                 req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
                 if 'autostart' in req:
                     set_autostart(bool(req['autostart']))
+                if req.get('group_by') == 'ai':
+                    _GROUPING['at'] = 0
                 for key, allowed in (('refresh', REFRESH_OPTS), ('orcas', (True, False)), ('group_by', ('orca', 'ai'))):
                     if key in req:
                         if req[key] not in allowed:
@@ -1590,7 +1598,7 @@ header{background:var(--card);border-radius:10px;padding:10px 12px;box-shadow:0 
 .brand{display:flex;align-items:center;gap:8px}.brand b{font-size:15px;letter-spacing:-.01em}.brand .logo{display:block;flex:none}
 .cnt{display:inline-flex;align-items:baseline;gap:4px;font-size:12px;font-weight:600;color:var(--st);margin-left:12px}.cnt b{font-size:16px;font-weight:800}
 .cnt.failt{--st:#dc2626}.tiles{align-items:center}
-.subbar{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin:-12px 4px 10px;font-size:10.5px;color:var(--ink3)}.subbar .legend{margin:0}
+.subbar{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin:-12px 4px 10px;font-size:10.5px;color:var(--ink3)}.subbar .legend{margin:0}#grouping{margin-right:auto;display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:var(--ink2)}.donut{width:14px;height:14px;border-radius:50%;border:2.5px solid var(--left);border-top-color:var(--wait);animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .brand .tag{font-style:normal;font-size:11px;font-weight:500;color:var(--ink3);margin-left:2px}
 .tiles{display:flex;gap:6px}.tile{min-width:62px;text-align:center;border-radius:8px;padding:4px 8px;
 background:color-mix(in srgb,var(--st) 10%,var(--card));border:1px solid color-mix(in srgb,var(--st) 30%,transparent)}
