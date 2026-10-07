@@ -35,3 +35,14 @@ if __name__ == '__main__':
     out = sys.argv[1]
     open(out + '/fav.svg', 'w').write(favicon())
     open(out + '/tpl.svg', 'w').write(template())
+
+
+def mono(bg='#1e293b', fg='#ffffff'):
+    # 메뉴바 아이콘과 같은 한 색 실루엣. 짙은 바탕에 흰 범고래(무늬는 뚫어서 바탕색이 보이게)
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+            '<rect width="32" height="32" rx="8" fill="%s"/>'
+            '<mask id="mm"><rect width="32" height="32" fill="#fff"/><g fill="#000">%s<path d="%s"/></g>'
+            '<path d="%s" fill="#000"/></mask>'
+            '<g mask="url(#mm)" fill="%s"><path d="%s"/></g>'
+            '<path d="M2 27.2 Q6 25.3 10 27.2 T18 27.2 T26 27.2 T34 27.2" fill="none" stroke="%s" stroke-width="2" stroke-linecap="round"/></svg>'
+            % (bg, EYE, CHIN, WAVE, fg, BODY, fg))
