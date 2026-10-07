@@ -1054,14 +1054,23 @@ def build():
         with ThreadPoolExecutor(6) as ex:
             steps = dict(zip(logs, ex.map(summarize, logs)))
 
+    mode = group_mode()
+    if mode == 'ai':
+        assign_groups([(t.get('log') or t['handle'], (steps.get(t.get('log')) or {}).get('title'),
+                        (steps.get(t.get('log')) or {}).get('summary')) for t in terms])
+        gorder = load_groups()['groups']
     cols, modals, count = {}, [], {'wait': 0, 'busy': 0}
     for t in sorted(terms, key=lambda x: -(x.get('lastOutputAt') or 0)):
         w = worktrees.get(t['worktreeId'], {})
-        ws = w.get('displayName') or os.path.basename(w.get('path', '') or '')
-        manual = snaps.get(t['paneKey'])
+        if mode == 'ai':
+            ws = group_of(t.get('log') or t['handle'])
+            rank = -(gorder.index(ws) if ws in gorder else 999)   # 그룹이 생긴 순서대로, Unsorted 는 맨 뒤
+        else:
+            ws = w.get('displayName') or os.path.basename(w.get('path', '') or '')
+            rank = w.get('sortOrder') or 0
         order, card, modal = render(t, steps.get(t.get('log')), None, ws)
         count['wait' if order[0] == 0 else 'busy'] += 1
-        cols.setdefault((w.get('sortOrder') or 0, ws), []).append((order, card))
+        cols.setdefault((rank, ws), []).append((order, card))
         modals.append(modal)
 
     def col_head(ws, cards):
@@ -1073,8 +1082,11 @@ def build():
     tiles = ''.join('<span class="cnt %s"><b>%d</b>%s</span>' % (k, count[k], LABEL[k]) for k in ('wait', 'busy'))
     if nfail:
         tiles += '<span class="cnt failt" title="Sessions whose summary failed (showing the last good one)"><b>%d</b>Failed</span>' % nfail
-    wslist = json.dumps([{'id': w['id'], 'name': w.get('displayName') or os.path.basename(w.get('path', ''))}
-                         for w in worktrees.values() if not w.get('isArchived') and w.get('path') != os.path.expanduser('~/.spyhop')], ensure_ascii=False)
+    if mode == 'ai':
+        wslist = json.dumps([{'id': 'group:' + n, 'name': n} for n in sorted({ws for _, ws in cols}) if n != UNSORTED], ensure_ascii=False)
+    else:
+        wslist = json.dumps([{'id': w['id'], 'name': w.get('displayName') or os.path.basename(w.get('path', ''))}
+                             for w in worktrees.values() if not w.get('isArchived') and w.get('path') != os.path.expanduser('~/.spyhop')], ensure_ascii=False)
     legend = ('<div class="legend"><span><i class="lg done"></i>Done</span><span><i class="lg now"></i>Now</span>'
               '<span><i class="lg left"></i>Next</span><span><i class="lg side"></i>Intercept</span></div>')
     # 헤더는 한 줄: 로고·이름 | (범고래 물결) | 숫자 두 개 · 설정. 범례와 갱신 시각은 오른쪽 아래로 뺀다
@@ -1092,6 +1104,82 @@ def build():
         json.dump({'at': time.time(), 'sessions': infos}, f, ensure_ascii=False)
     os.replace(STATE + '.%d.tmp' % os.getpid(), STATE)
     return len(terms)
+
+
+# ---------- 묶기: 오르카 워크스페이스 / AI 주제 ----------
+GROUPS_FILE = os.path.expanduser('~/.spyhop/groups.json')
+UNSORTED = 'Unsorted'
+GROUP_PROMPT = """아래는 지금 떠 있는 AI 코딩 세션 목록이다. 새 세션을 주제별 그룹에 배정하라. JSON 하나로만 답하라.
+{"assign": {"<세션 id>": "<그룹 이름>"}}
+- 기존 그룹이 있으면 최대한 그대로 쓴다. 새 그룹은 기존 그룹 어디에도 안 맞을 때만 만든다. 그룹은 전체 6개를 넘기지 않는다.
+- 그룹 이름은 일의 주제를 나타내는 2~12자 명사구로 쓴다(예: MFE 이관, 이벤트 증설, 보드 개발). 세션 제목을 그대로 쓰지 않는다.
+- 배정할 세션 id 만 assign 에 넣는다.
+"""
+_GROUPING = {'busy': False, 'at': 0}
+
+
+def group_mode():
+    m = load_config().get('group_by')
+    if m == 'orca' and find_bin('orca'):
+        return 'orca'
+    if m == 'ai':
+        return 'ai'
+    return 'orca' if find_bin('orca') else 'ai'
+
+
+def load_groups():
+    try:
+        with open(GROUPS_FILE, encoding='utf-8') as f:
+            g = json.load(f)
+        return {'groups': list(g.get('groups') or []), 'assign': dict(g.get('assign') or {})}
+    except (OSError, ValueError):
+        return {'groups': [], 'assign': {}}
+
+
+def save_groups(g):
+    os.makedirs(os.path.dirname(GROUPS_FILE), exist_ok=True)
+    with open(GROUPS_FILE + '.tmp', 'w', encoding='utf-8') as f:
+        json.dump(g, f, ensure_ascii=False, indent=1)
+    os.replace(GROUPS_FILE + '.tmp', GROUPS_FILE)
+
+
+def assign_groups(items):
+    """items: [(key, title, summary)]. 아직 그룹이 없는 세션만 모델에 물어 배정한다(뒤에서, 1분에 한 번까지).
+    한 번 정한 그룹과 사람이 끌어서 옮긴 그룹은 바꾸지 않는다."""
+    g = load_groups()
+    todo = [(k, t, sm) for k, t, sm in items if k not in g['assign'] and t]
+    if not todo or _GROUPING['busy'] or time.time() - _GROUPING['at'] < 60:
+        return
+    _GROUPING.update(busy=True, at=time.time())
+
+    def work():
+        try:
+            live = {k for k, _, _ in items}
+            used = [x for x in g['groups'] if any(v.get('g') == x for k, v in g['assign'].items() if k in live)]
+            ids = {'s%d' % i: k for i, (k, _, _) in enumerate(todo, 1)}
+            body = ('기존 그룹: %s\n\n배정할 세션:\n%s' % (json.dumps(used, ensure_ascii=False) if used else '(없음)',
+                    '\n'.join('%s: %s — %s' % (sid, t, (sm or '')[:120]) for sid, (k, t, sm) in zip(ids, todo))))
+            out = llm(GROUP_PROMPT, body)
+            res = json.JSONDecoder().raw_decode(out[out.index('{'):])[0].get('assign') or {}
+            cur = load_groups()
+            for sid, name in res.items():
+                name = str(name).strip()[:24]
+                if sid in ids and name and ids[sid] not in cur['assign']:
+                    cur['assign'][ids[sid]] = {'g': name, 'manual': False}
+                    if name not in cur['groups']:
+                        cur['groups'].append(name)
+            save_groups(cur)
+        except Exception as e:
+            sys.stderr.write('grouping: %s\n' % str(e)[:200])
+        finally:
+            _GROUPING['busy'] = False
+    import threading
+    threading.Thread(target=work, daemon=True).start()
+
+
+def group_of(key):
+    a = load_groups()['assign'].get(key)
+    return a['g'] if a else UNSORTED
 
 
 PORT = 47613
@@ -1149,7 +1237,7 @@ def serve():
                 req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
                 if 'autostart' in req:
                     set_autostart(bool(req['autostart']))
-                for key, allowed in (('refresh', REFRESH_OPTS), ('orcas', (True, False))):
+                for key, allowed in (('refresh', REFRESH_OPTS), ('orcas', (True, False)), ('group_by', ('orca', 'ai'))):
                     if key in req:
                         if req[key] not in allowed:
                             return self.send(400, b'bad value')
@@ -1194,6 +1282,14 @@ def serve():
         except ValueError:
             return self.send(400, b'bad')
         info = next((x for x in json.load(open(STATE)).get('sessions', []) if x['handle'] == req.get('h')), None)
+        if info and str(req.get('wid', '')).startswith('group:'):
+            g = load_groups()
+            name = req['wid'][6:]
+            g['assign'][info.get('log') or info['handle']] = {'g': name, 'manual': True}
+            if name not in g['groups']:
+                g['groups'].append(name)
+            save_groups(g)
+            return self.send(200, 'Moved'.encode())
         if not info:
             return self.send(404, 'Unknown session'.encode())
         if info['status'] != 'wait':
@@ -1446,6 +1542,11 @@ def render_settings():
             + sec('Summarizer', 'Model that writes titles, steps and TODOs',
                   '<select class="sel" onchange="setSum(this.value)">%s</select>' % groups)
             + sec('Theme', '', '<div class="ths">%s</div>' % cards)
+            + sec('Group by', 'Orca workspaces, or topics the AI picks' if find_bin('orca') else 'Topics the AI picks (Orca not found)',
+                  '<div class="pills">%s</div>' % ''.join(
+                      '<button class="%s"%s onclick="setCfg({group_by:\'%s\'},this);setTimeout(function(){location.reload()},600)">%s</button>'
+                      % ('on' if group_mode() == k else '', '' if (k == 'ai' or find_bin('orca')) else ' disabled', k, label)
+                      for k, label in (('orca', 'Orca workspace'), ('ai', 'AI topics'))))
             + sec('Orca animation', 'Orcas spyhop in the header',
                   '<label class="sw"><input type="checkbox"%s onchange="setCfg({orcas:this.checked})"><i></i></label>' % (' checked' if orcas_on() else ''))
             + sec('Start at login', 'Run the board when you log in to this Mac',
@@ -1628,7 +1729,7 @@ border-radius:12px;padding:10px;gap:8px;flex-wrap:wrap;align-items:center;box-sh
 ::-webkit-scrollbar-corner{background:transparent}
 
 header{position:relative;overflow:hidden}.brand .tag{font-style:normal;font-size:11px;font-weight:500;color:var(--ink3);margin-left:6px}.sea{position:absolute;left:0;right:0;bottom:0;height:44px;pointer-events:none;overflow:hidden}.sea:after{content:"";position:absolute;left:0;right:0;bottom:2px;height:6px;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2232%22%20height%3D%226%22%20viewBox%3D%220%200%2032%206%22%3E%3Cpath%20d%3D%22M0%203%20Q4%200.5%208%203%20T16%203%20T24%203%20T32%203%22%20fill%3D%22none%22%20stroke%3D%22%23cbd5e1%22%20stroke-width%3D%221.4%22/%3E%3C/svg%3E") repeat-x;opacity:.7}.orca{position:absolute;bottom:-1px;width:36px;height:36px;transform:translateY(100%);animation:spy 3.4s ease-in-out forwards}@keyframes spy{0%{transform:translateY(100%) rotate(-8deg)}28%{transform:translateY(6%) rotate(0)}72%{transform:translateY(6%) rotate(4deg)}100%{transform:translateY(100%) rotate(-4deg)}}@media (prefers-reduced-motion:reduce){.orca{display:none}}
-.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.side{background:var(--side)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.box.set{padding:16px 22px 6px}.box.set>.row{padding-bottom:12px}.sg{display:grid;grid-template-columns:170px 1fr;gap:18px;align-items:center;padding:16px 0;border-top:1px solid var(--line)}.sgl b{display:block;font-size:12.5px}.sgl small{display:block;margin-top:2px;font-size:11px;color:var(--ink3);line-height:1.35}.sgr{min-width:0}.sgr .sel{min-width:0;width:100%;max-width:320px}.sgr .pills{width:max-content}.sw{position:relative;display:inline-block;width:38px;height:22px;cursor:pointer}.sw input{display:none}.sw i{position:absolute;inset:0;border-radius:11px;background:var(--left);transition:.2s}.sw i:after{content:'';position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.25)}.sw input:checked+i{background:var(--wait)}.sw input:checked+i:after{left:19px}@media (max-width:640px){.sg{grid-template-columns:1fr;gap:8px}}.mets{display:grid;grid-template-columns:1fr 1fr;gap:10px}.met{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:grid;grid-template-columns:auto 1fr;align-items:center;column-gap:8px;color:var(--wait)}.met span{font-size:11px;color:var(--ink3);grid-column:1/3}.met b{font-size:20px;color:var(--ink)}.met svg{width:100%;height:28px}.met small{grid-column:1/3;font-size:10.5px;color:var(--ink3)}.sel{font:inherit;font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:280px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:4px 11px;font-size:11.5px;color:var(--ink2)}.pills button+button{border-left:1px solid var(--line)}.pills button.on{background:color-mix(in srgb,var(--wait) 14%,var(--card));color:var(--ink);font-weight:700}.ths{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:6px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:58px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
+.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.side{background:var(--side)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.box.set{padding:16px 22px 6px}.box.set>.row{padding-bottom:12px}.sg{display:grid;grid-template-columns:170px 1fr;gap:18px;align-items:center;padding:16px 0;border-top:1px solid var(--line)}.sgl b{display:block;font-size:12.5px}.sgl small{display:block;margin-top:2px;font-size:11px;color:var(--ink3);line-height:1.35}.sgr{min-width:0}.sgr .sel{min-width:0;width:100%;max-width:320px}.sgr .pills{width:max-content}.sw{position:relative;display:inline-block;width:38px;height:22px;cursor:pointer}.sw input{display:none}.sw i{position:absolute;inset:0;border-radius:11px;background:var(--left);transition:.2s}.sw i:after{content:'';position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.25)}.sw input:checked+i{background:var(--wait)}.sw input:checked+i:after{left:19px}@media (max-width:640px){.sg{grid-template-columns:1fr;gap:8px}}.mets{display:grid;grid-template-columns:1fr 1fr;gap:10px}.met{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:grid;grid-template-columns:auto 1fr;align-items:center;column-gap:8px;color:var(--wait)}.met span{font-size:11px;color:var(--ink3);grid-column:1/3}.met b{font-size:20px;color:var(--ink)}.met svg{width:100%;height:28px}.met small{grid-column:1/3;font-size:10.5px;color:var(--ink3)}.sel{font:inherit;font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:280px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:4px 11px;font-size:11.5px;color:var(--ink2)}.pills button+button{border-left:1px solid var(--line)}.pills button[disabled]{opacity:.4;cursor:default}.pills button.on{background:color-mix(in srgb,var(--wait) 14%,var(--card));color:var(--ink);font-weight:700}.ths{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:6px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:58px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
 <div id="dropbar"></div>
 <div id="mconfirm"><div class="cb"><h3>Move to another workspace?</h3><p><b id="mvt"></b><br><br>
 Closes this pane and resumes the same conversation in a split next to the target workspace. The transcript is kept.</p>
@@ -1656,6 +1757,7 @@ document.addEventListener('dragend',function(){setTimeout(function(){document.ge
 document.addEventListener('dragover',function(e){if(e.target.closest&&e.target.closest('#dropbar b')){e.preventDefault();
   document.querySelectorAll('#dropbar b').forEach(function(b){b.classList.toggle('hot',b===e.target.closest('#dropbar b'))})}});
 document.addEventListener('drop',function(e){var b=e.target.closest&&e.target.closest('#dropbar b');if(!b||!drag)return;e.preventDefault();
+  if(b.dataset.wid.indexOf('group:')===0){moveTarget={h:drag.h,wid:b.dataset.wid};doMove();return}
   if(drag.st!=='wait'){toast('Wait until the session stops to move it');return}
   moveTarget={h:drag.h,wid:b.dataset.wid};document.getElementById('mvt').textContent=drag.title+'  →  '+b.textContent;
   document.getElementById('mconfirm').className='on'});
