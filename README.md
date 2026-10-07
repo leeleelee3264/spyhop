@@ -59,6 +59,7 @@ python3 board.py --ensure   # 감시만 켠다
 - **켜짐**: `./spyhop` 실행 · 맥 로그인(설정의 Start at login 또는 `./spyhop --autostart`, 기본은 꺼짐) · Claude나 Codex가 떠 있을 때(메뉴바 플러그인이 5초마다 확인)
 - **꺼짐**: 떠 있는 AI 세션이 30분 동안 하나도 없으면 스스로 끝납니다. 다시 Claude·Codex를 켜거나 `./spyhop`을 실행하면 켜집니다.
 - 감시 프로세스는 하나만 뜹니다(중복 실행은 바로 종료).
+- 오르카의 Spyhop 워크스페이스에는 보드 탭과 작은 **도우미 터미널(spyhop helper)** 이 하나 있습니다. 오르카 명령에는 "워크스페이스로 화면 전환"이 없고 "터미널로 전환"만 있어서, 메뉴바의 Open full board 가 이 터미널을 디딤돌로 씁니다. 신경 쓰지 않아도 되고, 닫으면 다음에 다시 생깁니다.
 - 오르카 탭은 `~/.spyhop/open.html` 을 엽니다. 서버가 꺼져 있으면 "Starting the board…"를 보여주고, 서버가 뜨면 보드를 띄웁니다.
 
 ```bash

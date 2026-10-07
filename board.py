@@ -1030,8 +1030,10 @@ def build():
     worktrees = {w['id']: w for w in orca('worktree', 'list')['worktrees']}
     LIST_CACHE['list'] = orca('terminal', 'list')
     LIST_CACHE['stamp'] = {t['handle']: t.get('lastOutputAt') for t in LIST_CACHE['list']['terminals']}
+    spy = {w for w, v in worktrees.items() if v.get('path') == os.path.expanduser('~/.spyhop')}
     terms = [t for t in LIST_CACHE['list']['terminals']
-             if not t.get('orphaned') and not is_shell(t.get('title', ''))]
+             if not t.get('orphaned') and not is_shell(t.get('title', ''))
+             and t.get('worktreeId') not in spy and (t.get('ptyId') or '').split('@@')[0] not in spy]
     agents = orca_agents()
     for t in terms:
         t['paneKey'] = '%s:%s' % (t['tabId'], t['leafId'])
@@ -1304,23 +1306,64 @@ def set_autostart(on):
     subprocess.run(['launchctl', 'bootstrap', 'gui/' + uid, PLIST], capture_output=True)  # 이미 보드가 돌고 있으면 새로 뜬 쪽은 바로 끝난다
 
 
-def open_board():
-    """메뉴바의 'Open full board': 오르카가 있으면 Spyhop 워크스페이스의 보드 탭으로, 없으면 기본 브라우저로."""
-    if find_bin('orca'):
+_SPY = {}
+
+
+def _try(fn):
+    try:
+        fn()
+    except Exception:
+        pass
+
+
+def _spy_targets(make=False):
+    """Spyhop 워크스페이스 id, 보드 탭 id, 로그 터미널 handle 을 찾는다. make=True 면 없는 것을 만든다."""
+    home = os.path.expanduser('~/.spyhop')
+    if make:
         launcher = next((p for p in (os.path.join(HERE, 'spyhop'), os.path.join(HERE, 'progress-all')) if os.path.exists(p)), None)
+        if launcher:
+            subprocess.run([launcher], capture_output=True, timeout=60)   # 프로젝트·워크스페이스·탭이 없으면 만든다
+    wid = next(w['id'] for w in orca('worktree', 'list')['worktrees'] if w.get('path') == home)
+    page = next(t['browserPageId'] for t in orca('tab', 'list', '--worktree', 'id:' + wid)['tabs']
+                if '47613' in t.get('url', '') or 'spyhop/open.html' in t.get('url', ''))
+    term = next((t['handle'] for t in orca('terminal', 'list')['terminals']
+                 if (t.get('ptyId') or '').split('@@')[0] == wid or t.get('worktreeId') == wid), None)
+    if not term and make:
+        r = orca('terminal', 'create', '--worktree', 'id:' + wid, '--title', 'spyhop helper',
+                 '--command', "clear; printf 'Spyhop helper - keeps this workspace reachable. You can ignore this tab.\\n'; "
+                              "while :; do sleep 86400; done")
+        term = (r.get('terminal') or r).get('handle')
+    _SPY.update(wid=wid, page=page, term=term)
+
+
+def _spy_switch():
+    """오르카 명령에는 "이 워크스페이스로 화면 전환"이 없다. 터미널 전환이 워크스페이스까지 바꿔 주므로
+    Spyhop 워크스페이스의 작은 로그 터미널로 넘어간 뒤 보드 탭을 앞에 세운다. 둘 다 성공해야 True."""
+    ok = lambda r: '"ok": true' in (r.stdout or '')
+    a = subprocess.run(['orca', 'terminal', 'switch', '--terminal', _SPY['term'], '--json'], capture_output=True, text=True, timeout=15)
+    b = subprocess.run(['orca', 'tab', 'switch', '--page', _SPY['page'], '--worktree', 'id:' + _SPY['wid'], '--focus', '--json'],
+                       capture_output=True, text=True, timeout=15)
+    return ok(a) and ok(b)
+
+
+def open_board():
+    """메뉴바의 'Open full board': 오르카가 있으면 Spyhop 워크스페이스의 보드 탭으로, 없으면 기본 브라우저로.
+    처음 한 번만 찾고(필요하면 만들고) 그 뒤로는 기억한 대상으로 바로 전환한다."""
+    if find_bin('orca'):
+        subprocess.Popen(['osascript', '-e', 'tell application "Orca" to activate'],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)   # 앞으로 가져오기는 기다리지 않는다
         try:
-            if launcher:
-                subprocess.run([launcher], capture_output=True, timeout=60)   # 프로젝트·워크스페이스·탭이 없으면 만든다
-            home = os.path.expanduser('~/.spyhop')
-            wid = next(w['id'] for w in orca('worktree', 'list')['worktrees'] if w.get('path') == home)
-            tab = next(t for t in orca('tab', 'list', '--worktree', 'id:' + wid)['tabs']
-                       if '47613' in t.get('url', '') or 'spyhop/open.html' in t.get('url', ''))
-            subprocess.run(['orca', 'tab', 'switch', '--page', tab['browserPageId'], '--worktree', 'id:' + wid, '--focus', '--json'],
-                           capture_output=True, timeout=15)
-            subprocess.run(['osascript', '-e', 'tell application "Orca" to activate'], capture_output=True, timeout=5)
+            if not (_SPY.get('term') and _SPY.get('page') and _spy_switch()):
+                try:
+                    _spy_targets()                 # 이미 있으면 찾기만 (빠름)
+                except (StopIteration, KeyError):
+                    _spy_targets(make=True)        # 처음이면 만든다
+                if not _SPY.get('term'):
+                    _spy_targets(make=True)
+                _spy_switch()
             return
         except (StopIteration, KeyError, ValueError, OSError, subprocess.SubprocessError):
-            pass
+            _SPY.clear()
     subprocess.run(['open', 'file://' + LOADER])
 
 
@@ -1339,6 +1382,8 @@ def watch():
     with open(PIDFILE, 'w') as f:
         f.write(str(os.getpid()))
     serve()
+    import threading
+    threading.Thread(target=lambda: find_bin('orca') and _try(_spy_targets), daemon=True).start()
     last_seen = time.time()
     while time.time() - last_seen < IDLE_EXIT:
         try:
