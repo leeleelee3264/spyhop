@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# 어디서든 실행: 오르카 전체 세션 보드를 켜고, 보드 탭이 없을 때만 연다
+set -e
+d=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+url=http://127.0.0.1:47613/
+python3 "$d/board.py" --ensure
+sleep 1
+if [ -n "${ORCA_WORKTREE_ID:-}" ] && command -v orca >/dev/null; then
+  orca tab list --json 2>/dev/null | grep -q '127.0.0.1:47613' && { echo "already open: $url"; exit 0; }
+  orca tab create --url "$url" --json >/dev/null && echo "opened: orca-tab $url" && exit 0
+fi
+open "$url" && echo "opened: browser $url"
