@@ -310,6 +310,7 @@ def summarize(path):
                     % (json.dumps(prev, ensure_ascii=False), mask(transcript(path, base['pos']))))
         else:
             body = '<기록>\n%s\n</기록>\n\n위 기록을 지시한 JSON 하나로만 출력하라.' % mask(transcript(path))
+        by = current_summarizer()
         out = llm(PROMPT, body)
         data = json.JSONDecoder().raw_decode(out[out.index('{'):])[0]  # JSON 뒤에 붙은 말은 버린다
         items = [{'label': str(i.get('label', ''))[:20],
@@ -337,7 +338,7 @@ def summarize(path):
         flow = tidy_steps(flow)
         res = {'size': size, 'pos': size, 'at': time.time(), 'title': title,
                'summary': data.get('summary'), 'last_reply': data.get('last_reply'),
-               'needs_reply': bool(data.get('needs_reply')), 'steps': flow, 'items': items[-7:], 'ok_at': time.time()}
+               'needs_reply': bool(data.get('needs_reply')), 'steps': flow, 'items': items[-7:], 'ok_at': time.time(), 'by': by}
     except Exception as e:
         sys.stderr.write('summarize %s: %s\n' % (key, str(e)[:200]))
         # 실패해도 1분은 다시 부르지 않는다 (5초마다 무거운 호출을 반복하지 않게)
