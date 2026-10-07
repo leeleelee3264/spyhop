@@ -1074,7 +1074,7 @@ def build():
     if nfail:
         tiles += '<span class="cnt failt" title="Sessions whose summary failed (showing the last good one)"><b>%d</b>Failed</span>' % nfail
     wslist = json.dumps([{'id': w['id'], 'name': w.get('displayName') or os.path.basename(w.get('path', ''))}
-                         for w in worktrees.values() if not w.get('isArchived')], ensure_ascii=False)
+                         for w in worktrees.values() if not w.get('isArchived') and w.get('path') != os.path.expanduser('~/.spyhop')], ensure_ascii=False)
     legend = ('<div class="legend"><span><i class="lg done"></i>Done</span><span><i class="lg now"></i>Now</span>'
               '<span><i class="lg left"></i>Next</span><span><i class="lg side"></i>Intercept</span></div>')
     # 헤더는 한 줄: 로고·이름 | (범고래 물결) | 숫자 두 개 · 설정. 범례와 갱신 시각은 오른쪽 아래로 뺀다

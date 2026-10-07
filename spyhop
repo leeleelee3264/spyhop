@@ -1,18 +1,31 @@
 #!/usr/bin/env bash
-# Spyhop 실행: 감시를 켜고, 오르카가 있으면 "Spyhop" 워크스페이스의 브라우저 탭으로 보드를 연다.
-# 워크스페이스가 없으면 첫 번째 프로젝트 아래에 만들고, 이미 보드 탭이 있으면 그대로 둔다. 오르카가 없으면 기본 브라우저로 연다.
+# Spyhop 실행: 감시를 켜고, 오르카가 있으면 전용 프로젝트(~/.spyhop)의 "Spyhop" 워크스페이스 브라우저 탭으로 보드를 연다.
+# 사용자의 코드 저장소는 건드리지 않는다. ~/.spyhop 은 빈 git 저장소(오르카가 프로젝트로 받으려면 git 이어야 함)로 한 번만 만든다.
+# 이미 보드 탭이 있으면 그대로 둔다. 오르카가 없으면 기본 브라우저로 연다.
 set -e
 d=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 url=http://127.0.0.1:47613/
+home="$HOME/.spyhop"
 python3 "$d/board.py" --ensure >/dev/null
 if command -v orca >/dev/null && orca status --json >/dev/null 2>&1; then
-  wid=$(orca worktree list --json | python3 -c "
-import json,sys
+  mkdir -p "$home"
+  if [ ! -d "$home/.git" ]; then
+    git -C "$home" init -q -b main
+    printf 'config.json\n' > "$home/.gitignore"
+    git -C "$home" add .gitignore
+    git -C "$home" -c user.name=spyhop -c user.email=spyhop@localhost commit -q -m "spyhop board home"
+  fi
+  wid="$(orca worktree list --json | python3 -c "
+import json,sys,os
 ws=json.load(sys.stdin)['result']['worktrees']
-print(next((w['id'] for w in ws if w.get('displayName')=='Spyhop' and not w.get('isArchived')),''))")
+print(next((w['id'] for w in ws if w.get('path')==os.path.expanduser('~/.spyhop') and not w.get('isArchived')),''))")"
   if [ -z "$wid" ]; then
-    repo=$(orca repo list --json | python3 -c "import json,sys;r=json.load(sys.stdin)['result']['repos'];print(r[0]['id'] if r else '')")
-    wid=$(orca worktree create --repo "id:$repo" --name Spyhop --no-parent --setup skip --json | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['worktree']['id'])")
+    orca repo add --path "$home" --json >/dev/null
+    wid="$(orca worktree list --json | python3 -c "
+import json,sys,os
+ws=json.load(sys.stdin)['result']['worktrees']
+print(next((w['id'] for w in ws if w.get('path')==os.path.expanduser('~/.spyhop')),''))")"
+    orca worktree set --worktree "id:$wid" --display-name Spyhop --json >/dev/null
   fi
   if ! orca tab list --worktree "id:$wid" --json 2>/dev/null | grep -q '127.0.0.1:47613'; then
     orca tab create --worktree "id:$wid" --url "$url" --json >/dev/null
