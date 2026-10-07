@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
-# 어디서든 실행: 오르카 전체 세션 보드를 켜고, 보드 탭이 없을 때만 연다
+# Spyhop 실행: 감시를 켜고, 오르카가 있으면 "Spyhop" 워크스페이스의 브라우저 탭으로 보드를 연다.
+# 워크스페이스가 없으면 첫 번째 프로젝트 아래에 만들고, 이미 보드 탭이 있으면 그대로 둔다. 오르카가 없으면 기본 브라우저로 연다.
 set -e
 d=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 url=http://127.0.0.1:47613/
-python3 "$d/board.py" --ensure
-sleep 1
-if [ -n "${ORCA_WORKTREE_ID:-}" ] && command -v orca >/dev/null; then
-  orca tab list --json 2>/dev/null | grep -q '127.0.0.1:47613' && { echo "already open: $url"; exit 0; }
-  orca tab create --url "$url" --json >/dev/null && echo "opened: orca-tab $url" && exit 0
+python3 "$d/board.py" --ensure >/dev/null
+if command -v orca >/dev/null && orca status --json >/dev/null 2>&1; then
+  wid=$(orca worktree list --json | python3 -c "
+import json,sys
+ws=json.load(sys.stdin)['result']['worktrees']
+print(next((w['id'] for w in ws if w.get('displayName')=='Spyhop' and not w.get('isArchived')),''))")
+  if [ -z "$wid" ]; then
+    repo=$(orca repo list --json | python3 -c "import json,sys;r=json.load(sys.stdin)['result']['repos'];print(r[0]['id'] if r else '')")
+    wid=$(orca worktree create --repo "id:$repo" --name Spyhop --no-parent --setup skip --json | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['worktree']['id'])")
+  fi
+  if ! orca tab list --worktree "id:$wid" --json 2>/dev/null | grep -q '127.0.0.1:47613'; then
+    orca tab create --worktree "id:$wid" --url "$url" --json >/dev/null
+  fi
+  echo "opened: orca workspace Spyhop ($url)"
+  exit 0
 fi
 open "$url" && echo "opened: browser $url"
