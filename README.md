@@ -21,6 +21,12 @@
 
 ![Board](docs/screenshots/board.png)
 
+## Why Spyhop
+
+- **You run many agents at once.** Several Claude Code and Codex sessions across workspaces and split panes, each doing something different.
+- **You lose track.** Which one finished? Which one is waiting for your answer? Which one has been stuck for ten minutes?
+- **Spyhop answers that at a glance.** Every session becomes a card with its steps, its TODOs and whose turn it is, summarized from the transcript and updated as the work moves.
+
 ## Quick start
 
 ```bash
@@ -41,7 +47,7 @@ cd spyhop
 | Platform | macOS, Python 3.9+ (standard library only) |
 | Needs | `orca` CLI on `PATH` · one summarizer: `claude` or `codex` logged in, or a DeepSeek API key |
 | Start | `./spyhop` (or turn on **Start at login** in Settings) |
-| Stop | `pkill -f "board.py --watch"` · it also stops by itself after 30 minutes with no sessions |
+| Stop | `./spyhop --stop` · it also stops by itself after 30 minutes with no sessions |
 | Is it running? | `curl -s http://127.0.0.1:47613/state.json` returns JSON |
 | Logs | `/tmp/progress-board/watch.log` · `~/Library/Logs/spyhop.log` when started at login |
 | Settings / groups | `~/.spyhop/config.json` · `~/.spyhop/groups.json` |
@@ -100,7 +106,7 @@ With [SwiftBar](https://github.com/swiftbar/SwiftBar), an orca icon in the menu 
 
 - **macOS** and **Python 3.9+**. No third-party packages.
 - **[Orca](https://github.com/stablyai/orca)** with the `orca` CLI on your `PATH`.
-- **One summarizer.** Spyhop uses the first one available (DeepSeek, then Claude, then Codex). Change it any time in Settings.
+- **One summarizer.** Spyhop uses the first one available (DeepSeek, then Claude, then Codex; the DeepSeek key is optional). Change it any time in Settings.
 
 | Summarizer | Models you can pick | What you need | Where transcripts go |
 |---|---|---|---|
@@ -124,6 +130,7 @@ When Claude or Codex CLI is the summarizer, Spyhop runs them without saving the 
 Options:
 
 ```bash
+./spyhop --stop           # stop the board
 ./spyhop --autostart      # start at login (LaunchAgent); same as the Settings switch
 ./spyhop --no-autostart   # remove it
 ```
@@ -159,6 +166,16 @@ Typical cost on a Mac with ~6 sessions: about 70–80 MB of memory and around 1%
 - Transcripts are sent to the summarizer you pick. Before sending, Spyhop masks strings that look like AWS keys, API tokens, JWTs and `password=` values. This is a best-effort filter, not a guarantee — pick a model your organization allows.
 - Summaries and state are kept in `/tmp/progress-board/`. Settings and topic groups live in `~/.spyhop/`.
 - The server listens on `127.0.0.1` only and only acts on sessions currently shown on the board.
+
+## Uninstall
+
+```bash
+./spyhop --no-autostart        # remove the login item, if you turned it on
+./spyhop --stop                # stop the board
+rm -r ~/.spyhop /tmp/progress-board
+```
+
+Then remove the **.spyhop** project from Orca's sidebar, and the SwiftBar plugin link if you added one.
 
 ## Files
 

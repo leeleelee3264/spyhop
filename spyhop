@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Spyhop 실행: 감시를 켜고, 오르카가 있으면 전용 프로젝트(~/.spyhop)의 "Spyhop" 워크스페이스 브라우저 탭으로 보드를 연다.
-# 사용자의 코드 저장소는 건드리지 않는다. ~/.spyhop 은 빈 git 저장소(오르카가 프로젝트로 받으려면 git 이어야 함)로 한 번만 만든다.
-# 탭은 ~/.spyhop/open.html 을 연다. 서버가 꺼져 있으면 기다렸다가 보드를 띄운다. 오르카가 없으면 기본 브라우저로 연다.
+# Spyhop launcher.
 #
-#   ./spyhop                 켜고 연다
-#   ./spyhop --autostart     맥 로그인 때 자동으로 켜지게 등록 (LaunchAgent)
-#   ./spyhop --no-autostart  자동 시작 해제
+#   ./spyhop                 start the board and open it
+#                            (with Orca: in a "Spyhop" workspace under the ~/.spyhop project; otherwise in the default browser)
+#   ./spyhop --stop          stop the board
+#   ./spyhop --autostart     start the board at login (LaunchAgent)
+#   ./spyhop --no-autostart  remove the login item
+#
+# Your own repositories are never touched. ~/.spyhop is a tiny empty git repo created once,
+# because Orca only registers git repos from the CLI.
 set -e
 d=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 home="$HOME/.spyhop"
@@ -13,6 +16,7 @@ loader="file://$home/open.html"
 
 if [ "${1:-}" = "--autostart" ]; then python3 "$d/board.py" --autostart on; exit 0; fi
 if [ "${1:-}" = "--no-autostart" ]; then python3 "$d/board.py" --autostart off; exit 0; fi
+if [ "${1:-}" = "--stop" ]; then pkill -f "board.py --watch" && echo "stopped" || echo "not running"; exit 0; fi
 
 python3 "$d/board.py" --ensure >/dev/null
 if command -v orca >/dev/null && orca status --json >/dev/null 2>&1; then
