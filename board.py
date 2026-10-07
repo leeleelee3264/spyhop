@@ -142,7 +142,7 @@ def llm(system, user):
 
 PROMPT = '''아래는 한 AI 코딩 세션의 대화 기록이다 (U=사용자, A=AI). 사용자는 목표 하나를 정해 두지 않고, 한 세션에서 일을 하나 끝내면 다음 일을 맡기는 식으로 쓴다. 이 세션에서 맡긴 일들을 JSON 하나로만 출력하라. 설명·코드블록 없이 JSON 만.
 
-{"title": "...", "summary": "...", "last_reply": "...", "needs_reply": true, "steps": [{"label": "...", "state": "done|now|left|blocked", "detail": "..."}], "items": [{"label": "...", "state": "done|now|open", "detail": "..."}]}
+{"title": "...", "summary": "...", "last_reply": "...", "needs_reply": true, "steps": [{"label": "...", "state": "done|now|left|blocked|side", "detail": "..."}], "items": [{"label": "...", "state": "done|now|open", "detail": "..."}]}
 
 - title: 이 세션이 붙잡고 있는 큰 일(사용자가 해결하려는 목표)을 구체적인 명사구로.
   그 목표를 위한 세부 작업(조사·검토·PR 하나 등)은 제목이 아니라 steps 로 쓴다.
@@ -159,7 +159,7 @@ PROMPT = '''아래는 한 AI 코딩 세션의 대화 기록이다 (U=사용자, 
   끝낸 단계도 done 으로 포함한다.
   done=끝난 단계, now=지금 단계(최대 1개), blocked=사용자 답·승인을 기다리는 단계, left=AI가 하겠다고 밝힌 남은 단계.
   **하던 일을 끝내기 전에 급히 다른 일로 넘어갔으면, 멈춘 일을 지우거나 done 으로 바꾸지 말고 지금 일(now) 뒤에 left 단계로 다시 붙인다(돌아갈 일).** 그 detail 에는 무엇이 남았는지 쓴다.
-  급히 다른 일을 끝내고 원래 일로 돌아왔으면, 끼어든 일은 done 한 단계로 남기고 원래 일을 다시 now 로 이어 붙인다.
+  급히 다른 일을 끝내고 원래 일로 돌아왔으면, 끼어든 일은 side 한 단계로 남기고(끝낸 일이다) 원래 일을 다시 now 로 이어 붙인다.
   **지금 일(now)에 아직 안 한 하위 작업이 남아 있으면(사용자가 번호로 나눠 맡긴 것, AI 가 남았다고 정리한 목록 등) now 뒤에 left 단계로 하나씩 쓴다.** 이것들은 오래된 done 단계보다 먼저 남긴다.
   AI 가 "~할까요?"처럼 다음 작업을 제안했는데 사용자가 아직 하라고도 말라고도 안 한 일은 left 단계로 남긴다(설명 질문이 끼어들어도 지우지 않는다).
   label 은 4~14자 명사구, detail 은 그 단계의 구체 내용 한 문장(30~80자).
@@ -274,13 +274,12 @@ def transcript(path, start=0):
 def tidy_steps(flow):
     """모델이 순서를 어기는 경우(앞은 비었는데 뒤가 진행·대기)를 바로잡는다.
     가장 앞의 now/blocked 를 지금 단계로 보고, 그 앞은 끝냄, 그 뒤는 예정으로 맞춘다."""
-    for f in flow:
-        if f['state'] == 'side':
-            f['state'] = 'done'  # 예전 정리에 남은 끼어든 일 표시는 끝냄으로 본다
     cur = next((i for i, f in enumerate(flow) if f['state'] in ('now', 'blocked')), None)
     if cur is None:
         return flow
     for i, f in enumerate(flow):
+        if f['state'] == 'side':
+            continue  # 끼어든 일은 끝낸 일로 치되 표시는 그대로 둔다
         if i < cur:
             f['state'] = 'done'
         elif i > cur:
@@ -318,14 +317,14 @@ def summarize(path):
                   'detail': str(i.get('detail') or '')[:160]}
                  for i in data.get('items', []) if i.get('label')]
         flow = [{'label': str(i.get('label', ''))[:18],
-                 'state': i.get('state') if i.get('state') in ('done', 'now', 'left', 'blocked') else 'left',
+                 'state': i.get('state') if i.get('state') in ('done', 'now', 'left', 'blocked', 'side') else 'left',
                  'detail': str(i.get('detail') or '')[:140]}
                 for i in data.get('steps', []) if i.get('label')]
         title = data.get('title')
         if base and not data.get('new_task'):
             title = base['title']
             # 끝난 단계·끝난 일은 지난 정리 그대로 고정하고, 모델이 준 것 중 새 것만 뒤에 붙인다
-            keep = [dict(f, state='done') for f in base.get('steps') or [] if f['state'] in ('done', 'side')]
+            keep = [dict(f) for f in base.get('steps') or [] if f['state'] in ('done', 'side')]
             flow = keep + [f for f in flow if f['label'] not in {k['label'] for k in keep}]
             # 지난번에 '예정'이던 단계를 모델이 말없이 빠뜨리면 다시 붙인다 (끝냈으면 모델이 done 으로 준다)
             have = {f['label'] for f in flow}
@@ -333,7 +332,7 @@ def summarize(path):
             kept = [i for i in base.get('items') or [] if i['state'] == 'done']
             items = kept + [i for i in items if i['label'] not in {k['label'] for k in kept}]
         while len(flow) > 8:  # 넘치면 오래된 끝낸 단계부터 뺀다
-            j = next((k for k, f in enumerate(flow) if f['state'] == 'done'), 0)
+            j = next((k for k, f in enumerate(flow) if f['state'] in ('done', 'side')), 0)
             flow.pop(j)
         flow = tidy_steps(flow)
         res = {'size': size, 'pos': size, 'at': time.time(), 'title': title,
@@ -684,7 +683,7 @@ def render_flow(items, busy, newest_first=True):
     show = {n for n, it in seq if it.get('state') in ('now', 'blocked', 'open')} | ({cur + 1} if cur else set())
     for n, it in (reversed(seq) if newest_first else seq):
         st = it.get('state') if it.get('state') in STATES else 'left'
-        tag = {'done': 'Done', 'now': 'Now', 'open': 'Left open', 'blocked': 'Now', 'left': 'Next', 'side': 'Done'}[st]
+        tag = {'done': 'Done', 'now': 'Now', 'open': 'Left open', 'blocked': 'Now', 'left': 'Next', 'side': 'Detour'}[st]
         nodes.append('<li class="n %s%s"><i>%s</i><div class="nc"><div class="nh"><span>%s</span><em>%s</em></div>%s</div></li>'
                      % (st, ' live' if busy and st == 'now' else '', '✓' if st == 'done' else n,
                         escape(it.get('label') or ''), tag,
@@ -875,7 +874,7 @@ def ring_open(n, total):
 def seg_steps(flow):
     cur = next((f for f in flow if f['state'] in ('blocked', 'now')), None)
     bar = ''.join('<u class="%s"></u>' % f['state'] for f in flow)
-    done = sum(1 for f in flow if f['state'] == 'done')
+    done = sum(1 for f in flow if f['state'] in ('done', 'side'))
     nxt = next((f for f in flow if f['state'] == 'left'), None)
     label = '%d/%d · %s' % (done, len(flow), escape(cur['label']) if cur else ('Next: ' + escape(nxt['label']) if nxt else 'Done'))
     return '<div class="seg"><div class="sb">%s</div><span>%s</span></div>' % (bar, label)
@@ -957,7 +956,7 @@ def render(t, steps, manual, ws):
              '<button class="go" onclick="go(\'%s\')">Go to session ↗</button>'
              '<button class="end" onclick="askEnd(\'%s\', this)">End session</button></div></div>'
              '<div class="cols"><div class="c1"><h4>Steps</h4>%s</div><div class="c2">%s%s</div></div>%s</div></div>'
-             % (st, cid, LABEL[st], escape(ws), chip, sidchip, stale, ring(sum(1 for f in flow if f['state'] == 'done'), len(flow)), title, summary, t['handle'], t['handle'],
+             % (st, cid, LABEL[st], escape(ws), chip, sidchip, stale, ring(sum(1 for f in flow if f['state'] in ('done', 'side')), len(flow)), title, summary, t['handle'], t['handle'],
                 render_flow(flow, st == 'busy', newest_first=False) if flow else '<p class="none">No steps yet</p>',
                 '<h4>Last reply</h4><div class="replybox"><p>%s</p></div>' % reply if reply else '',
                 render_todo(items, t.get('log')), render_more(dg, items)))
@@ -965,7 +964,7 @@ def render(t, steps, manual, ws):
     cur_step = next((f for f in flow if f['state'] in ('blocked', 'now')), None)
     t['_info'] = {'ws': ws, 'fail': bool(t.get('_fail')), 'stuck': bool(t.get('_stuck')), 'wid': t['worktreeId'], 'log': t.get('log') or '', 'cwd': t.get('worktreePath') or '', 'status': st, 'title': steps.get('title') or clean_title(t['title']),
                   'step': cur_step['label'] if cur_step else '',
-                  'done': sum(1 for f in flow if f['state'] == 'done'), 'total': len(flow),
+                  'done': sum(1 for f in flow if f['state'] in ('done', 'side')), 'total': len(flow),
                   'model': model, 'since': since, 'handle': t['handle'], 'order': order,
                   'summary': steps.get('summary') or '',
                   'note': '' if flow else ('Summarizing…' if t.get('log') else 'Transcript not found'), 'steps': [{'label': f['label'], 'state': f['state']} for f in flow]}
@@ -1021,7 +1020,7 @@ def build():
     wslist = json.dumps([{'id': w['id'], 'name': w.get('displayName') or os.path.basename(w.get('path', ''))}
                          for w in worktrees.values() if not w.get('isArchived')], ensure_ascii=False)
     legend = ('<div class="legend"><span><i class="lg done"></i>Done</span><span><i class="lg now"></i>Now</span>'
-              '<span><i class="lg left"></i>Next</span></div>')
+              '<span><i class="lg left"></i>Next</span><span><i class="lg side"></i>Detour</span></div>')
     head = (('<div class="brand"><b>Spyhop <em class="tag">all your AI sessions at a glance</em></b><small>updated %s</small>' + legend + '</div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' + GEAR + '</a></div>')
             % (time.strftime('%H:%M:%S'), tiles)) + (SEA if orcas_on() else '')
     html = TEMPLATE.replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
@@ -1038,7 +1037,7 @@ def build():
 
 
 PORT = 47613
-SEA = '<div class="sea" aria-hidden="true"></div><script>(function(){var sea=document.querySelector(".sea");if(!sea)return;function pop(){var o=document.createElement("div");o.className="orca";o.innerHTML=\'<svg viewBox="0 0 32 32" width="100%" height="100%"><path d="M9.6 31 C9 23 9.8 15.6 12 10.2 C13.4 6.8 15.2 4.6 16.9 4.4 C18.7 4.3 20 6.2 20.8 9.2 C22 13.6 22.5 20 22.6 31 Z" fill="#334155"/><ellipse cx="23.6" cy="24.2" rx="2.8" ry="1.1" transform="rotate(-28 23.6 24.2)" fill="#334155"/><g fill="#ffffff"><ellipse cx="18.4" cy="12.2" rx="1.25" ry="3.1" transform="rotate(-12 18.4 12.2)"/><path d="M12.4 9.6 C11.1 13.4 10.4 19 10.6 26 L14.6 26 C14 20.2 13.7 14.8 13.9 7.6 C13.3 8.2 12.8 8.9 12.4 9.6 Z"/></g></svg>\';var hb=sea.getBoundingClientRect(),a=document.querySelector(".brand").getBoundingClientRect().right-hb.left+16,b=document.querySelector(".tiles").getBoundingClientRect().left-hb.left-50;if(b<=a)return;o.style.left=(a+Math.random()*(b-a))+"px";var k=.75+Math.random()*.5;o.style.width=o.style.height=(36*k)+"px";sea.appendChild(o);setTimeout(function(){o.remove()},3600)}setTimeout(pop,500+Math.random()*4000);if(Math.random()<.5)setTimeout(pop,4500+Math.random()*4500)})()</script>'  # 헤더 아래에서 가끔 범고래가 고개를 내민다
+SEA = '<div class="sea" aria-hidden="true"></div><script>(function(){var sea=document.querySelector(".sea");if(!sea)return;function fitSea(){var h=sea.parentNode.getBoundingClientRect(),a=document.querySelector(".brand").getBoundingClientRect().right-h.left+16,b=h.right-document.querySelector(".tiles").getBoundingClientRect().left+16;sea.style.left=a+"px";sea.style.right=b+"px"}fitSea();addEventListener("resize",fitSea);function pop(){var o=document.createElement("div");o.className="orca";o.innerHTML=\'<svg viewBox="0 0 32 32" width="100%" height="100%"><path d="M9.6 31 C9 23 9.8 15.6 12 10.2 C13.4 6.8 15.2 4.6 16.9 4.4 C18.7 4.3 20 6.2 20.8 9.2 C22 13.6 22.5 20 22.6 31 Z" fill="#334155"/><ellipse cx="23.6" cy="24.2" rx="2.8" ry="1.1" transform="rotate(-28 23.6 24.2)" fill="#334155"/><g fill="#ffffff"><ellipse cx="18.4" cy="12.2" rx="1.25" ry="3.1" transform="rotate(-12 18.4 12.2)"/><path d="M12.4 9.6 C11.1 13.4 10.4 19 10.6 26 L14.6 26 C14 20.2 13.7 14.8 13.9 7.6 C13.3 8.2 12.8 8.9 12.4 9.6 Z"/></g></svg>\';var w=sea.getBoundingClientRect().width-36;if(w<=0)return;o.style.left=(Math.random()*w)+"px";var k=.75+Math.random()*.5;o.style.width=o.style.height=(36*k)+"px";sea.appendChild(o);setTimeout(function(){o.remove()},3600)}setTimeout(pop,500+Math.random()*4000);if(Math.random()<.5)setTimeout(pop,4500+Math.random()*4500)})()</script>'  # 헤더 아래에서 가끔 범고래가 고개를 내민다
 PANEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'panel.html')
 
 
@@ -1356,9 +1355,10 @@ border:1px solid color-mix(in srgb,var(--st) 25%,transparent);border-radius:2px 
 .m.now i{background:var(--now);border-color:var(--now)}.m.now span{color:var(--ink);font-weight:700}
 .m.blocked i{background:var(--card,#fff);border:2px solid var(--wait)}.m.blocked span{color:var(--wait);font-weight:700}
 .m.live i{animation:p 1.4s infinite}
+.m.side i{background:var(--side);border-color:var(--side)}.m.side span{color:var(--ink2)}.n.side i{background:var(--side);color:#fff}.n.side .nc{opacity:.75;padding:3px 9px}
 .model{font-style:normal;font-size:10px;font-weight:600;color:var(--ink2);background:var(--col);padding:1px 5px;border-radius:3px;margin-left:5px;white-space:nowrap}
 .seg{display:none;margin-top:7px}.sb{display:flex;gap:2px;height:5px}
-.sb u{flex:1;border-radius:2px;background:var(--left)}.sb u.done{background:var(--done)}.sb u.now{background:var(--now)}.sb u.blocked{background:transparent;box-shadow:inset 0 0 0 1.5px var(--wait)}
+.sb u{flex:1;border-radius:2px;background:var(--left)}.sb u.done{background:var(--done)}.sb u.side{background:var(--side)}.sb u.now{background:var(--now)}.sb u.blocked{background:transparent;box-shadow:inset 0 0 0 1.5px var(--wait)}
 .seg span{display:block;font-size:11px;color:var(--ink2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card.lv-bar .mini{display:none}.card.lv-bar .seg{display:block}
 .card.lv-nosum .sum{display:none}.card.lv-noreply .reply{display:none}.card.lv-min h3{-webkit-line-clamp:1}
@@ -1464,7 +1464,7 @@ border-radius:12px;padding:10px;gap:8px;flex-wrap:wrap;align-items:center;box-sh
 ::-webkit-scrollbar-corner{background:transparent}
 
 header{position:relative;overflow:hidden}.brand .tag{font-style:normal;font-size:11px;font-weight:500;color:var(--ink3);margin-left:6px}.sea{position:absolute;left:0;right:0;bottom:0;height:44px;pointer-events:none;overflow:hidden}.sea:after{content:"";position:absolute;left:0;right:0;bottom:2px;height:6px;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2232%22%20height%3D%226%22%20viewBox%3D%220%200%2032%206%22%3E%3Cpath%20d%3D%22M0%203%20Q4%200.5%208%203%20T16%203%20T24%203%20T32%203%22%20fill%3D%22none%22%20stroke%3D%22%23cbd5e1%22%20stroke-width%3D%221.4%22/%3E%3C/svg%3E") repeat-x;opacity:.7}.orca{position:absolute;bottom:-1px;width:36px;height:36px;transform:translateY(100%);animation:spy 3.4s ease-in-out forwards}@keyframes spy{0%{transform:translateY(100%) rotate(-8deg)}28%{transform:translateY(6%) rotate(0)}72%{transform:translateY(6%) rotate(4deg)}100%{transform:translateY(100%) rotate(-4deg)}}@media (prefers-reduced-motion:reduce){.orca{display:none}}
-.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:4px 11px;font-size:11.5px;color:var(--ink2)}.pills button+button{border-left:1px solid var(--line)}.pills button.on{background:color-mix(in srgb,var(--wait) 14%,var(--card));color:var(--ink);font-weight:700}.ths{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:7px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:74px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
+.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.side{background:var(--side)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:4px 11px;font-size:11.5px;color:var(--ink2)}.pills button+button{border-left:1px solid var(--line)}.pills button.on{background:color-mix(in srgb,var(--wait) 14%,var(--card));color:var(--ink);font-weight:700}.ths{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:7px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:74px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
 <div id="dropbar"></div>
 <div id="mconfirm"><div class="cb"><h3>Move to another workspace?</h3><p><b id="mvt"></b><br><br>
 Closes this pane and resumes the same conversation in a split next to the target workspace. The transcript is kept.</p>
