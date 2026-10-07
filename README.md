@@ -146,8 +146,13 @@ Typical cost on a Mac with ~6 sessions: about 70–80 MB of memory and around 1%
 | `spyhop` | Launcher |
 | `tools/demo_screens.py` | Regenerates the screenshots in `docs/screenshots` from demo data |
 
-## Roadmap
+## TODO
 
-- Work without Orca: find sessions from recent transcripts and group them by AI topics.
-- Keep one source of truth for the code (the author's copy currently lives outside this repo).
-- A license.
+- [ ] **Work without Orca** — find sessions from recent Claude/Codex transcripts and group them by AI topics. Today the board shows no cards without Orca.
+- [ ] Many groups: keep a minimum column width and scroll sideways; add a "reset groups" button.
+- [ ] Try "move to another workspace" end to end with real sessions.
+- [ ] Keep one source of truth for the code (the author's running copy still lives outside this repo).
+- [ ] Add a license.
+- [ ] Notify when a session turns to "My turn" (macOS notification).
+- [ ] Show PR status (merged, CI) on cards.
+- [ ] Setting for the language of card content (titles, steps, TODOs).
