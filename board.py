@@ -1022,12 +1022,10 @@ def build():
                          for w in worktrees.values() if not w.get('isArchived')], ensure_ascii=False)
     legend = ('<div class="legend"><span><i class="lg done"></i>Done</span><span><i class="lg now"></i>Now</span>'
               '<span><i class="lg left"></i>Next</span></div>')
-    head = (('<div class="brand"><b>Spyhop <em class="tag">all your AI sessions at a glance</em></b><small>%d sessions · updated %s</small>' + legend + '</div><div class="tiles"><label class="pick" title="Model that writes the card summaries">Summarizer <select id="sum" onchange="setSum(this.value)">'
-             + ''.join('<option value="%s"%s>%s</option>' % (o['id'], ' selected' if o['id'] == current_summarizer() else '', o['label']) for o in summarizers())
-             + '</select></label>%s</div>')
+    head = (('<div class="brand"><b>Spyhop <em class="tag">all your AI sessions at a glance</em></b><small>%d sessions · updated %s</small>' + legend + '</div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' + GEAR + '</a></div>')
             % (len(terms), time.strftime('%H:%M:%S'), tiles)) + SEA
-    html = TEMPLATE.replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
-        .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals)))
+    html = TEMPLATE.replace('__THEME_CSS__', THEME_CSS).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
+        .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals) + render_settings()))
     os.makedirs(BASE, exist_ok=True)
     with open(OUT + '.tmp', 'w', encoding='utf-8') as f:
         f.write(html)
@@ -1066,9 +1064,11 @@ def serve():
             if u.path in ('/', '/board'):
                 return self.send(200, open(OUT, 'rb').read(), 'text/html; charset=utf-8')
             if u.path == '/panel':
-                return self.send(200, open(PANEL, 'rb').read(), 'text/html; charset=utf-8')
+                page = open(PANEL, encoding='utf-8').read().replace('</style>', THEME_CSS + '</style>', 1) \
+                    .replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1)
+                return self.send(200, page.encode(), 'text/html; charset=utf-8')
             if u.path == '/config':
-                return self.send(200, json.dumps({'summarizer': current_summarizer(), 'options': summarizers()}).encode(), 'application/json')
+                return self.send(200, json.dumps({'summarizer': current_summarizer(), 'options': summarizers(), 'theme': current_theme()}).encode(), 'application/json')
             if u.path == '/state.json':
                 return self.send(200, open(STATE, 'rb').read(), 'application/json')
             if u.path == '/switch':
@@ -1087,9 +1087,14 @@ def serve():
         def do_POST(self):
             if urlparse(self.path).path == '/config':
                 req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
-                if req.get('summarizer') not in [x['id'] for x in summarizers()]:
-                    return self.send(400, b'unavailable')
-                save_config(summarizer=req['summarizer'])
+                if 'theme' in req:
+                    if req['theme'] not in [x[0] for x in THEMES]:
+                        return self.send(400, b'unknown theme')
+                    save_config(theme=req['theme'])
+                if 'summarizer' in req:
+                    if req['summarizer'] not in [x['id'] for x in summarizers()]:
+                        return self.send(400, b'unavailable')
+                    save_config(summarizer=req['summarizer'])
                 return self.send(200, b'saved')
             if urlparse(self.path).path == '/toggle':
                 try:
@@ -1208,6 +1213,58 @@ def main(argv):
                          stdout=subprocess.DEVNULL, stderr=open(os.path.join(BASE, 'watch.log'), 'a'),
                          start_new_session=True)
     print('board: ' + OUT)
+
+
+# ---------- 테마 ----------
+# 'classic' 은 기본 색(시스템 다크 모드를 따라감). 나머지는 머티리얼 계열 팔레트로 고정.
+THEMES = [
+    ('classic', 'Classic', None),
+    ('indigo', 'Material Indigo', dict(bg='#eef0fb', col='#e2e5f6', card='#ffffff', line='rgba(40,53,147,.14)', ink='#1a1c2e', ink2='#45485e', ink3='#767990',
+                                       done='#43a047', now='#fb8c00', left='#c5cae9', wait='#3949ab', busy='#d81b60')),
+    ('teal', 'Material Teal', dict(bg='#ecf6f5', col='#dceeec', card='#ffffff', line='rgba(0,105,92,.14)', ink='#10302d', ink2='#3d5a57', ink3='#6f8a87',
+                                   done='#26a69a', now='#ffb300', left='#b2dfdb', wait='#00897b', busy='#ec407a')),
+    ('purple', 'Material You', dict(bg='#fef7ff', col='#f3edf7', card='#ffffff', line='rgba(103,80,164,.16)', ink='#1d1b20', ink2='#49454f', ink3='#79747e',
+                                    done='#4caf50', now='#ffa000', left='#d0bcff', wait='#6750a4', busy='#e91e63')),
+    ('dark', 'Material Dark', dict(bg='#121212', col='#1c1c1c', card='#262626', line='rgba(255,255,255,.12)', ink='#ececec', ink2='#b3b3b3', ink3='#8a8a8a',
+                                   done='#66bb6a', now='#ffca28', left='#474747', wait='#4fc3f7', busy='#f48fb1')),
+    ('bluegrey', 'Material Blue Grey', dict(bg='#1b2328', col='#222c32', card='#2b363d', line='rgba(255,255,255,.1)', ink='#eceff1', ink2='#b0bec5', ink3='#78909c',
+                                            done='#66bb6a', now='#ffb74d', left='#455a64', wait='#4dd0e1', busy='#f48fb1')),
+]
+# 미리보기 카드에서만 쓰는 클래식 색 (실제 클래식은 :root 기본값 + 시스템 다크 모드)
+CLASSIC_PREVIEW = ('.thp[data-theme="classic"]{--bg:#f4f5f8;--col:#ebecf0;--card:#fff;--line:rgba(20,24,40,.12);--ink:#172b4d;--ink2:#44546f;'
+                   '--ink3:#8590a2;--done:#5cb88f;--now:#d9a944;--left:#c9ced8;--wait:#3fa877;--busy:#e283b0}')
+THEME_CSS = CLASSIC_PREVIEW + ''.join('[data-theme="%s"]{%s}' % (tid, ';'.join('--%s:%s' % kv for kv in v.items())) for tid, _, v in THEMES if v)
+
+
+def current_theme():
+    t = load_config().get('theme', 'classic')
+    return t if t in [x[0] for x in THEMES] else 'classic'
+
+
+GEAR = ('<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 '
+        '2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051'
+        'a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg>')
+
+SUM_NOTE = {'deepseek': 'Fast (~6s). Transcripts go to DeepSeek.',
+            'claude-haiku': 'Uses your Claude login (~15-60s). Transcripts stay with Anthropic.',
+            'codex': 'Uses your Codex login and its default model. Transcripts go to OpenAI.'}
+
+
+def render_settings():
+    cur = current_summarizer()
+    sums = ''.join('<label class="opt"><input type="radio" name="sum" value="%s"%s onchange="setSum(this.value)">'
+                   '<span><b>%s</b><small>%s</small></span></label>'
+                   % (o['id'], ' checked' if o['id'] == cur else '', o['label'], SUM_NOTE.get(o['id'], '')) for o in summarizers())
+    th = current_theme()
+    cards = ''.join('<button class="th%s" data-id="%s" onclick="setTheme(\'%s\')">'
+                    '<div class="thp" data-theme="%s"><i class="t1"></i><div class="tc"><i class="tb"></i><i class="tl"></i>'
+                    '<span><i class="d done"></i><i class="d now"></i><i class="d left"></i></span></div></div><em>%s</em></button>'
+                    % (' on' if tid == th else '', tid, tid, tid, label) for tid, label, _ in THEMES)
+    return ('<div class="modal" id="settings"><a class="bg" href="#"></a><div class="box set">'
+            '<div class="row"><b class="stt">Settings</b><a class="x" href="#">Close ✕</a></div>'
+            '<h4>Summarizer</h4><p class="hint">The model that writes titles, steps and TODOs. Only models available on this Mac are listed.</p>'
+            '<div class="opts">%s</div><h4>Theme</h4><div class="ths">%s</div></div></div>' % (sums, cards))
 
 
 TEMPLATE = '''<!doctype html><html lang="ko"><head><meta charset="utf-8">
@@ -1370,7 +1427,7 @@ border-radius:12px;padding:10px;gap:8px;flex-wrap:wrap;align-items:center;box-sh
 ::-webkit-scrollbar-corner{background:transparent}
 
 header{position:relative;overflow:hidden}.brand .tag{font-style:normal;font-size:11px;font-weight:500;color:var(--ink3);margin-left:6px}.sea{position:absolute;left:0;right:0;bottom:0;height:44px;pointer-events:none;overflow:hidden}.sea:after{content:"";position:absolute;left:0;right:0;bottom:2px;height:6px;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2232%22%20height%3D%226%22%20viewBox%3D%220%200%2032%206%22%3E%3Cpath%20d%3D%22M0%203%20Q4%200.5%208%203%20T16%203%20T24%203%20T32%203%22%20fill%3D%22none%22%20stroke%3D%22%23cbd5e1%22%20stroke-width%3D%221.4%22/%3E%3C/svg%3E") repeat-x;opacity:.7}.orca{position:absolute;bottom:-1px;width:36px;height:36px;transform:translateY(100%);animation:spy 3.4s ease-in-out forwards}@keyframes spy{0%{transform:translateY(100%) rotate(-8deg)}28%{transform:translateY(6%) rotate(0)}72%{transform:translateY(6%) rotate(4deg)}100%{transform:translateY(100%) rotate(-4deg)}}@media (prefers-reduced-motion:reduce){.orca{display:none}}
-.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:#fff}.lg.left{border-color:var(--left);background:#fff}.pick{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--ink3);margin-right:6px}.pick select{font:inherit;font-size:11px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 6px}</style></head><body><div id="toast"></div>
+.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.ths{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:7px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:74px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
 <div id="dropbar"></div>
 <div id="mconfirm"><div class="cb"><h3>Move to another workspace?</h3><p><b id="mvt"></b><br><br>
 Closes this pane and resumes the same conversation in a split next to the target workspace. The transcript is kept.</p>
@@ -1413,6 +1470,9 @@ function tog(li){var done=!li.classList.contains('done');
   var em=li.querySelector('em:not(.me)');if(em)em.remove();
   fetch('http://127.0.0.1:47613/toggle',{method:'POST',body:JSON.stringify({log:li.dataset.log,label:li.dataset.label,done:done})})
   .catch(function(){toast('Board server is not running; not saved')})}
+function setTheme(t){document.documentElement.dataset.theme=t;
+  document.querySelectorAll('.th').forEach(function(b){b.classList.toggle('on',b.dataset.id===t)});
+  fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify({theme:t})}).catch(function(){toast('Board server is not running')})}
 function setSum(v){fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify({summarizer:v})})
   .then(function(r){toast(r.ok?'Summarizer saved · applies from the next update':'That model is not available')})
   .catch(function(){toast('Board server is not running')})}
@@ -1430,7 +1490,7 @@ function fit(){var lv=['lv-nosum','lv-noreply','lv-bar','lv-min'];document.query
   var hid=cards.filter(function(a){return a.getBoundingClientRect().bottom>innerHeight}).length;
   if(hid){m.textContent='↓ '+hid+' more below';m.style.display='block'}})}
 fit();var ft;addEventListener('resize',function(){clearTimeout(ft);ft=setTimeout(fit,120)});
-setInterval(function(){if((!location.hash||location.hash==='#')&&document.activeElement.id!=='sum')location.reload()},10000)</script>
+setInterval(function(){if((!location.hash||location.hash==='#'))location.reload()},10000)</script>
 </body></html>'''
 
 if __name__ == '__main__':
