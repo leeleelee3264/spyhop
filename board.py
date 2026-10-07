@@ -54,6 +54,92 @@ def deepseek(system, user):
         res = json.load(r)
     return ''.join(c.get('text', '') for c in res.get('content', []) if c.get('type') == 'text')
 
+
+# ---------- 요약 모델 선택 ----------
+# 보드 화면의 드롭다운에서 고르고 ~/.spyhop/config.json 에 저장한다.
+# Claude·Codex 는 이 맥에 로그인된 CLI 를 그대로 쓴다. 요약 호출이 새 대화로 저장되지 않게(보드가 그걸 세션으로 읽지 않게)
+# 저장을 끄고, 도구는 쓰지 못하게 막는다.
+CONFIG = os.path.expanduser('~/.spyhop/config.json')
+EXTRA_PATH = [os.path.expanduser('~/.local/bin'), '/opt/homebrew/bin', '/usr/local/bin']
+
+
+def find_bin(name):
+    import shutil
+    return shutil.which(name, path=os.pathsep.join([os.environ.get('PATH', '')] + EXTRA_PATH))
+
+
+def load_config():
+    try:
+        with open(CONFIG, encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_config(**kw):
+    cfg = dict(load_config(), **kw)
+    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+    with open(CONFIG, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=1)
+
+
+_SUMS = {}
+
+
+def summarizers():
+    """이 맥에서 실제로 쓸 수 있는 요약 모델만 돌려준다 (1분 캐시)."""
+    if time.time() - _SUMS.get('at', 0) < 60:
+        return _SUMS['list']
+    _SUMS['list'], _SUMS['at'] = _find_summarizers(), time.time()
+    return _SUMS['list']
+
+
+def _find_summarizers():
+    has_key = subprocess.run(['security', 'find-generic-password', '-s', 'deepseek-api'],
+                             capture_output=True).returncode == 0
+    return [s for s in (
+        {'id': 'deepseek', 'label': 'DeepSeek (API)', 'ok': has_key},
+        {'id': 'claude-haiku', 'label': 'Claude Haiku (claude CLI)', 'ok': bool(find_bin('claude'))},
+        {'id': 'codex', 'label': 'Codex (codex CLI)', 'ok': bool(find_bin('codex'))},
+    ) if s['ok']]
+
+
+def current_summarizer():
+    opts = [s['id'] for s in summarizers()]
+    want = load_config().get('summarizer', 'deepseek')
+    return want if want in opts else (opts[0] if opts else 'deepseek')
+
+
+def claude_cli(system, user):
+    r = subprocess.run([find_bin('claude'), '-p', '--model', 'haiku', '--no-session-persistence',
+                        '--system-prompt', system, '--output-format', 'text',
+                        '--disallowedTools', 'Bash,Read,Write,Edit,MultiEdit,Glob,Grep,WebFetch,WebSearch,Task,NotebookEdit'],
+                       input=user, capture_output=True, text=True, timeout=300, cwd=BASE)
+    if r.returncode:
+        raise RuntimeError('claude: ' + (r.stderr or r.stdout)[:200])
+    return r.stdout
+
+
+def codex_cli(system, user):
+    import tempfile
+    with tempfile.NamedTemporaryFile('r', suffix='.txt', dir=BASE) as out:
+        r = subprocess.run([find_bin('codex'), 'exec', '--ephemeral', '--skip-git-repo-check', '-s', 'read-only',
+                            '--color', 'never', '-o', out.name,
+                            system + '\n\n도구나 명령을 쓰지 말고, 아래 <stdin> 의 내용만 읽고 바로 JSON 으로 답하라.'],
+                           input=user, capture_output=True, text=True, timeout=300, cwd=BASE)
+        if r.returncode:
+            raise RuntimeError('codex: ' + (r.stderr or r.stdout)[-200:])
+        return out.read()
+
+
+def llm(system, user):
+    which = current_summarizer()
+    if which == 'claude-haiku':
+        return claude_cli(system, user)
+    if which == 'codex':
+        return codex_cli(system, user)
+    return deepseek(system, user)
+
 PROMPT = '''아래는 한 AI 코딩 세션의 대화 기록이다 (U=사용자, A=AI). 사용자는 목표 하나를 정해 두지 않고, 한 세션에서 일을 하나 끝내면 다음 일을 맡기는 식으로 쓴다. 이 세션에서 맡긴 일들을 JSON 하나로만 출력하라. 설명·코드블록 없이 JSON 만.
 
 {"title": "...", "summary": "...", "last_reply": "...", "needs_reply": true, "steps": [{"label": "...", "state": "done|now|left|blocked", "detail": "..."}], "items": [{"label": "...", "state": "done|now|open", "detail": "..."}]}
@@ -225,7 +311,7 @@ def summarize(path):
                     % (json.dumps(prev, ensure_ascii=False), mask(transcript(path, base['pos']))))
         else:
             body = '<기록>\n%s\n</기록>\n\n위 기록을 지시한 JSON 하나로만 출력하라.' % mask(transcript(path))
-        out = deepseek(PROMPT, body)
+        out = llm(PROMPT, body)
         data = json.JSONDecoder().raw_decode(out[out.index('{'):])[0]  # JSON 뒤에 붙은 말은 버린다
         items = [{'label': str(i.get('label', ''))[:20],
                   'state': i.get('state') if i.get('state') in STATES else 'open',
@@ -436,15 +522,15 @@ def ago(ms):
         return ''
     sec = max(0, int(time.time() - ms / 1000))
     if sec < 60:
-        return '방금'
+        return 'just now'
     if sec < 3600:
-        return '%d분 전' % (sec // 60)
+        return '%dm ago' % (sec // 60)
     if sec < 86400:
-        return '%d시간 전' % (sec // 3600)
-    return '%d일 전' % (sec // 86400)
+        return '%dh ago' % (sec // 3600)
+    return '%dd ago' % (sec // 86400)
 
 
-LABEL = {'wait': '내 차례', 'busy': '작업 중'}
+LABEL = {'wait': 'My turn', 'busy': 'Working'}
 
 
 def model_of(path):
@@ -583,12 +669,12 @@ def since_of(t, status='wait'):
 def for_how_long(sec):
     sec = max(0, int(time.time() - sec))
     if sec < 60:
-        return '방금'
+        return 'just now'
     if sec < 3600:
-        return '%d분째' % (sec // 60)
+        return '%dm' % (sec // 60)
     if sec < 86400:
-        return '%d시간째' % (sec // 3600)
-    return '%d일째' % (sec // 86400)
+        return '%dh' % (sec // 3600)
+    return '%dd' % (sec // 86400)
 
 
 def render_flow(items, busy, newest_first=True):
@@ -598,7 +684,7 @@ def render_flow(items, busy, newest_first=True):
     show = {n for n, it in seq if it.get('state') in ('now', 'blocked', 'open')} | ({cur + 1} if cur else set())
     for n, it in (reversed(seq) if newest_first else seq):
         st = it.get('state') if it.get('state') in STATES else 'left'
-        tag = {'done': '완료' if not newest_first else '끝냄', 'now': '지금 하는 중', 'open': '열어 둔 채 넘어감', 'blocked': '내 답 대기', 'left': '예정', 'side': '끼어든 일 · 끝냄'}[st]
+        tag = {'done': 'Done', 'now': 'Now', 'open': 'Left open', 'blocked': 'Now', 'left': 'Next', 'side': 'Done'}[st]
         nodes.append('<li class="n %s%s"><i>%s</i><div class="nc"><div class="nh"><span>%s</span><em>%s</em></div>%s</div></li>'
                      % (st, ' live' if busy and st == 'now' else '', '✓' if st == 'done' else n,
                         escape(it.get('label') or ''), tag,
@@ -756,7 +842,7 @@ def render_todo(items, log=''):
         st = mine.get(label) or i.get('state')
         box = ('<svg viewBox="0 0 16 16" width="16" height="16"><rect x="1" y="1" width="14" height="14" rx="4" class="cb-box"/>'
                '<path d="M4.5 8.3 L7 10.6 L11.6 5.6" class="cb-tick"/></svg>')
-        tag = '<em class="o">멈춤</em>' if st == 'open' else ''  # 하다 말고 넘어간 일만 표시
+        tag = '<em class="o">Paused</em>' if st == 'open' else ''  # 하다 말고 넘어간 일만 표시
         rows.append('<li class="cb %s" data-log="%s" data-label="%s" onclick="tog(this)">%s<span>%s</span>%s</li>'
                     % (st, escape(os.path.basename(log or '')), escape(label), box, escape(label), tag))
     return '<h4>TODO</h4><ul class="todo">%s</ul>' % ''.join(rows)
@@ -765,14 +851,14 @@ def render_todo(items, log=''):
 def render_more(dg, items=()):
     rows = []
     if dg['ask']:
-        rows.append('<dt>마지막 요청</dt><dd>%s</dd>' % escape(dg['ask'][:300]))
+        rows.append('<dt>Last request</dt><dd>%s</dd>' % escape(dg['ask'][:300]))
     if dg.get('full'):
-        rows.append('<dt>마지막 답 원문</dt><dd class="md">%s</dd>' % md(dg['full']))
+        rows.append('<dt>Last reply (raw)</dt><dd class="md">%s</dd>' % md(dg['full']))
     elif dg['block']:
-        rows.append('<dt>마지막 답 원문</dt><dd class="md">%s</dd>' % md('\n'.join(dg['block'])))
+        rows.append('<dt>Last reply (raw)</dt><dd class="md">%s</dd>' % md('\n'.join(dg['block'])))
     if not rows:
         return ''
-    return '<details><summary>더 보기</summary><dl>%s</dl></details>' % ''.join(rows)
+    return '<details><summary>More</summary><dl>%s</dl></details>' % ''.join(rows)
 
 
 def ring(done, total):
@@ -783,7 +869,7 @@ def ring(done, total):
 
 
 def ring_open(n, total):
-    return '<div class="openbig"><b>%d</b><span>열린 일</span><small>전체 %d건</small></div>' % (n, total)
+    return '<div class="openbig"><b>%d</b><span>open</span><small>of %d</small></div>' % (n, total)
 
 
 def seg_steps(flow):
@@ -791,7 +877,7 @@ def seg_steps(flow):
     bar = ''.join('<u class="%s"></u>' % f['state'] for f in flow)
     done = sum(1 for f in flow if f['state'] == 'done')
     nxt = next((f for f in flow if f['state'] == 'left'), None)
-    label = '%d/%d · %s' % (done, len(flow), escape(cur['label']) if cur else ('다음: ' + escape(nxt['label']) if nxt else '완료'))
+    label = '%d/%d · %s' % (done, len(flow), escape(cur['label']) if cur else ('Next: ' + escape(nxt['label']) if nxt else 'Done'))
     return '<div class="seg"><div class="sb">%s</div><span>%s</span></div>' % (bar, label)
 
 
@@ -815,14 +901,14 @@ def render(t, steps, manual, ws):
     st = status_of(t, steps.get('needs_reply'), dg)
     since = since_of(t, st)
     cid = re.sub(r'[^A-Za-z0-9]', '', t['paneKey'])[-16:]
-    title = escape(steps.get('title') or clean_title(t['title']) or '(제목 없음)')
+    title = escape(steps.get('title') or clean_title(t['title']) or '(untitled)')
     summary = escape(steps.get('summary') or '')
     reply = escape(steps.get('last_reply') or dg['recap'] or '')  # 터미널 recap 은 영어로 나올 때가 있어 DeepSeek 요약(한국어)을 먼저 쓴다
     done = sum(1 for i in items if i['state'] == 'done')
     opened = [i for i in items if i['state'] == 'open']
     cur = next((i for i in items if i['state'] == 'now'), None)
-    meta = '이 세션의 일 %d건' % len(items) if items else ''
-    open_chip = '<b class="open">열린 일 %d</b>' % len(opened) if opened else ''
+    meta = '%d tasks in this session' % len(items) if items else ''
+    open_chip = '<b class="open">%d open</b>' % len(opened) if opened else ''
     flow = tidy_steps([dict(f) for f in steps.get('steps') or []])
     for f in flow:  # 단계 색은 끝냄·지금·예정 셋만 쓴다 (내 차례 여부는 카드 상태가 이미 보여준다)
         if f['state'] == 'blocked':
@@ -835,10 +921,10 @@ def render(t, steps, manual, ws):
     e = steps.get('err') or ''
     ok = steps.get('ok_at')
     if steps.get('fail'):
-        why = '연결 안 됨' if ('urlopen' in e or 'nodename' in e or 'timed out' in e) else \
-              ('답 형식 오류' if ('Expecting' in e or 'substring' in e or 'Extra data' in e) else '오류')
-        stale = ('<span class="fail" title="DeepSeek 정리 실패: %s · 마지막 성공 %s · 1분마다 다시 시도"><i></i>정리 실패 · %s</span>'
-                 % (escape(e), time.strftime('%H:%M', time.localtime(ok)) if ok else '없음', why))
+        why = 'connection failed' if ('urlopen' in e or 'nodename' in e or 'timed out' in e) else \
+              ('bad response' if ('Expecting' in e or 'substring' in e or 'Extra data' in e) else 'error')
+        stale = ('<span class="fail" title="Summary failed: %s · last success %s · retrying every minute"><i></i>Summary failed · %s</span>'
+                 % (escape(e), time.strftime('%H:%M', time.localtime(ok)) if ok else 'never', why))
         t['_fail'] = True
     else:
         try:
@@ -848,32 +934,32 @@ def render(t, steps, manual, ws):
         except OSError:
             lag = 0
         if lag > 180:   # 대화는 바뀌었는데 3분 넘게 다시 정리되지 않음
-            stale = '<span class="stale" title="대화는 바뀌었는데 정리가 %d분째 갱신되지 않았습니다">정리 %d분 지연</span>' % (lag // 60, lag // 60)
+            stale = '<span class="stale" title="The conversation changed but the summary is %d min behind">Summary %dm behind</span>' % (lag // 60, lag // 60)
     if st == 'busy' and t.get('log'):
         try:
             idle = time.time() - os.path.getmtime(t['log'])
         except OSError:
             idle = 0
         if idle > 300 and time.time() - since > 300:  # 막 시작한 작업은 제외
-            stale += ('<span class="stuck" title="작업 중인데 대화 기록이 %d분째 그대로입니다. 오래 걸리는 명령이나 응답 없는 도구에 걸렸을 수 있어요">'
-                      '<i></i>%d분째 진전 없음</span>' % (idle // 60, idle // 60))
+            stale += ('<span class="stuck" title="Working, but the transcript has not changed for %d min. It may be running a long command or stuck on a tool.">'
+                      '<i></i>No progress for %dm</span>' % (idle // 60, idle // 60))
             t['_stuck'] = True
-    sidchip = ('<button class="sid" title="누르면 복사: %s" onclick="cp(this,\'%s\')">ID %s</button>' % (escape(resume), sid, sid[:8])) if sid else ''
+    sidchip = ('<button class="sid" title="Click to copy: %s" onclick="cp(this,\'%s\')">ID %s</button>' % (escape(resume), sid, sid[:8])) if sid else ''
     chip = '<i class="model">%s</i>' % escape(model) if model else ''
     card = ('<a class="card %s" href="#c%s" draggable="true" data-h="%s" data-st="%s" data-wid="%s" data-title="%s"><div class="row"><span><b class="badge">%s</b>%s</span><small>%s</small></div>'
             '<h3>%s</h3>%s%s%s'
             '</a>'
-            % (st, cid, t['handle'], st, escape(t['worktreeId']), title, LABEL[st], chip, for_how_long(since) + (' 대기' if st == 'wait' else ' 작업'), title, stale, (mini_steps(flow, st == 'busy') + seg_steps(flow)) if flow else '',
+            % (st, cid, t['handle'], st, escape(t['worktreeId']), title, LABEL[st], chip, (lambda h: h if h == 'just now' else h + (' waiting' if st == 'wait' else ' working'))(for_how_long(since)), title, stale, (mini_steps(flow, st == 'busy') + seg_steps(flow)) if flow else '',
                ''))  # 마지막 답은 카드에서 빼고 상세 창에서만 보여준다
     modal = ('<div class="modal %s" id="c%s"><a class="bg" href="#"></a><div class="box">'
-             '<div class="row"><span class="meta2"><b class="badge">%s</b><b class="ws">%s</b>%s%s%s</span><a class="x" href="#">닫기 ✕</a></div>'
+             '<div class="row"><span class="meta2"><b class="badge">%s</b><b class="ws">%s</b>%s%s%s</span><a class="x" href="#">Close ✕</a></div>'
              '<div class="hero">%s<div><h2>%s</h2><p class="sum">%s</p>'
-             '<button class="go" onclick="go(\'%s\')">이 창으로 이동 ↗</button>'
-             '<button class="end" onclick="askEnd(\'%s\', this)">세션 끝내기</button></div></div>'
-             '<div class="cols"><div class="c1"><h4>단계</h4>%s</div><div class="c2">%s%s</div></div>%s</div></div>'
+             '<button class="go" onclick="go(\'%s\')">Go to session ↗</button>'
+             '<button class="end" onclick="askEnd(\'%s\', this)">End session</button></div></div>'
+             '<div class="cols"><div class="c1"><h4>Steps</h4>%s</div><div class="c2">%s%s</div></div>%s</div></div>'
              % (st, cid, LABEL[st], escape(ws), chip, sidchip, stale, ring(sum(1 for f in flow if f['state'] == 'done'), len(flow)), title, summary, t['handle'], t['handle'],
-                render_flow(flow, st == 'busy', newest_first=False) if flow else '<p class="none">단계 정보 없음</p>',
-                '<h4>마지막 답</h4><div class="replybox"><p>%s</p></div>' % reply if reply else '',
+                render_flow(flow, st == 'busy', newest_first=False) if flow else '<p class="none">No steps yet</p>',
+                '<h4>Last reply</h4><div class="replybox"><p>%s</p></div>' % reply if reply else '',
                 render_todo(items, t.get('log')), render_more(dg, items)))
     order = (0, since) if st == 'wait' else (1, -since)  # 오래 기다린 내 차례가 맨 위
     cur_step = next((f for f in flow if f['state'] in ('blocked', 'now')), None)
@@ -882,7 +968,7 @@ def render(t, steps, manual, ws):
                   'done': sum(1 for f in flow if f['state'] == 'done'), 'total': len(flow),
                   'model': model, 'since': since, 'handle': t['handle'], 'order': order,
                   'summary': steps.get('summary') or '',
-                  'note': '' if flow else ('단계 정리 중' if t.get('log') else '기록을 못 찾음'), 'steps': [{'label': f['label'], 'state': f['state']} for f in flow]}
+                  'note': '' if flow else ('Summarizing…' if t.get('log') else 'Transcript not found'), 'steps': [{'label': f['label'], 'state': f['state']} for f in flow]}
     return order, card, modal
 
 
@@ -931,15 +1017,17 @@ def build():
     tiles = ''.join('<div class="tile %s"><b>%d</b><span>%s</span></div>' % (k, count[k], LABEL[k])
                     for k in ('wait', 'busy'))
     if nfail:
-        tiles += '<div class="tile failt" title="DeepSeek 정리가 실패한 세션 수 (마지막 성공본을 보여주는 중)"><b>%d</b><span>정리 실패</span></div>' % nfail
+        tiles += '<div class="tile failt" title="Sessions whose summary failed (showing the last good one)"><b>%d</b><span>Failed</span></div>' % nfail
     wslist = json.dumps([{'id': w['id'], 'name': w.get('displayName') or os.path.basename(w.get('path', ''))}
                          for w in worktrees.values() if not w.get('isArchived')], ensure_ascii=False)
-    legend = ('<div class="legend"><span><i class="lg done"></i>끝냄</span><span><i class="lg now"></i>지금</span>'
-              '<span><i class="lg left"></i>예정</span></div>')
-    head = (('<div class="brand"><b>Spyhop <em class="tag">AI 세션 한눈에</em></b><small>세션 %d개 · %s 갱신</small>' + legend + '</div><div class="tiles">%s</div>')
+    legend = ('<div class="legend"><span><i class="lg done"></i>Done</span><span><i class="lg now"></i>Now</span>'
+              '<span><i class="lg left"></i>Next</span></div>')
+    head = (('<div class="brand"><b>Spyhop <em class="tag">all your AI sessions at a glance</em></b><small>%d sessions · updated %s</small>' + legend + '</div><div class="tiles"><label class="pick" title="Model that writes the card summaries">Summarizer <select id="sum" onchange="setSum(this.value)">'
+             + ''.join('<option value="%s"%s>%s</option>' % (o['id'], ' selected' if o['id'] == current_summarizer() else '', o['label']) for o in summarizers())
+             + '</select></label>%s</div>')
             % (len(terms), time.strftime('%H:%M:%S'), tiles)) + SEA
     html = TEMPLATE.replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
-        .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">바다가 조용합니다 · 떠 있는 세션이 없습니다.</p>', ''.join(modals)))
+        .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals)))
     os.makedirs(BASE, exist_ok=True)
     with open(OUT + '.tmp', 'w', encoding='utf-8') as f:
         f.write(html)
@@ -979,6 +1067,8 @@ def serve():
                 return self.send(200, open(OUT, 'rb').read(), 'text/html; charset=utf-8')
             if u.path == '/panel':
                 return self.send(200, open(PANEL, 'rb').read(), 'text/html; charset=utf-8')
+            if u.path == '/config':
+                return self.send(200, json.dumps({'summarizer': current_summarizer(), 'options': summarizers()}).encode(), 'application/json')
             if u.path == '/state.json':
                 return self.send(200, open(STATE, 'rb').read(), 'application/json')
             if u.path == '/switch':
@@ -995,6 +1085,12 @@ def serve():
             return self.send(404, b'not found')
 
         def do_POST(self):
+            if urlparse(self.path).path == '/config':
+                req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
+                if req.get('summarizer') not in [x['id'] for x in summarizers()]:
+                    return self.send(400, b'unavailable')
+                save_config(summarizer=req['summarizer'])
+                return self.send(200, b'saved')
             if urlparse(self.path).path == '/toggle':
                 try:
                     req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
@@ -1027,15 +1123,15 @@ def serve():
             return self.send(400, b'bad')
         info = next((x for x in json.load(open(STATE)).get('sessions', []) if x['handle'] == req.get('h')), None)
         if not info:
-            return self.send(404, '목록에 없는 세션'.encode())
+            return self.send(404, 'Unknown session'.encode())
         if info['status'] != 'wait':
-            return self.send(409, '작업 중인 세션은 옮기지 않습니다. 멈춘 뒤에 옮겨 주세요'.encode())
+            return self.send(409, 'Cannot move a working session. Wait until it stops.'.encode())
         if req.get('wid') == info['wid']:
-            return self.send(409, '이미 그 워크스페이스에 있습니다'.encode())
+            return self.send(409, 'Already in that workspace'.encode())
         log = info.get('log') or ''
         sid = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$', log)
         if not sid:
-            return self.send(409, '대화 기록을 못 찾아서 이어 열 수 없습니다'.encode())
+            return self.send(409, 'Transcript not found, cannot resume'.encode())
         tool = 'codex resume' if '/.codex/' in log else 'claude --resume'
         cmd = 'cd %s && %s %s' % (shlex.quote(info['cwd'] or os.path.expanduser('~')), tool, sid.group(1))
         # 대상 워크스페이스에 살아 있는 창을 하나 찾아 그 옆을 나눈다. 없으면 새 탭을 만든다
@@ -1057,8 +1153,8 @@ def serve():
                                capture_output=True, text=True, timeout=20)
         sys.stderr.write('move %s -> %s: %s | %s\n' % (info['handle'], req['wid'], cmd, (r.stdout or r.stderr)[:200]))
         if r.returncode != 0:
-            return self.send(500, ('기존 창은 닫혔지만 새 창을 못 열었습니다. 직접 실행: ' + cmd).encode())
-        return self.send(200, '옮겼습니다'.encode())
+            return self.send(500, ('Closed the old pane but could not open a new one. Run manually: ' + cmd).encode())
+        return self.send(200, 'Moved'.encode())
 
     H.move = _move
     try:
@@ -1274,14 +1370,14 @@ border-radius:12px;padding:10px;gap:8px;flex-wrap:wrap;align-items:center;box-sh
 ::-webkit-scrollbar-corner{background:transparent}
 
 header{position:relative;overflow:hidden}.brand .tag{font-style:normal;font-size:11px;font-weight:500;color:var(--ink3);margin-left:6px}.sea{position:absolute;left:0;right:0;bottom:0;height:44px;pointer-events:none;overflow:hidden}.sea:after{content:"";position:absolute;left:0;right:0;bottom:2px;height:6px;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2232%22%20height%3D%226%22%20viewBox%3D%220%200%2032%206%22%3E%3Cpath%20d%3D%22M0%203%20Q4%200.5%208%203%20T16%203%20T24%203%20T32%203%22%20fill%3D%22none%22%20stroke%3D%22%23cbd5e1%22%20stroke-width%3D%221.4%22/%3E%3C/svg%3E") repeat-x;opacity:.7}.orca{position:absolute;bottom:-1px;width:36px;height:36px;transform:translateY(100%);animation:spy 3.4s ease-in-out forwards}@keyframes spy{0%{transform:translateY(100%) rotate(-8deg)}28%{transform:translateY(6%) rotate(0)}72%{transform:translateY(6%) rotate(4deg)}100%{transform:translateY(100%) rotate(-4deg)}}@media (prefers-reduced-motion:reduce){.orca{display:none}}
-.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:#fff}.lg.left{border-color:var(--left);background:#fff}</style></head><body><div id="toast"></div>
+.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:#fff}.lg.left{border-color:var(--left);background:#fff}.pick{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--ink3);margin-right:6px}.pick select{font:inherit;font-size:11px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 6px}</style></head><body><div id="toast"></div>
 <div id="dropbar"></div>
-<div id="mconfirm"><div class="cb"><h3>다른 워크스페이스로 옮길까요?</h3><p><b id="mvt"></b><br><br>
-지금 창을 닫고, 옮길 워크스페이스의 창 옆을 나눠 같은 대화를 이어서 엽니다(resume). 대화 기록은 그대로입니다.</p>
-<div class="row2"><button onclick="cancelMove()">취소</button><button class="danger" onclick="doMove()">옮기기</button></div></div></div>
-<div id="confirm"><div class="cb"><h3>이 세션을 끝낼까요?</h3><p><b id="cft"></b><br><br>
-이 분할 창 하나만 닫히고, 같은 탭의 다른 창은 그대로입니다. 대화 기록은 남아서 나중에 다시 열 수 있습니다.</p>
-<div class="row2"><button onclick="cancelEnd()">취소</button><button class="danger" onclick="doEnd()">끝내기</button></div></div></div><header>__HEAD__</header>__BODY__
+<div id="mconfirm"><div class="cb"><h3>Move to another workspace?</h3><p><b id="mvt"></b><br><br>
+Closes this pane and resumes the same conversation in a split next to the target workspace. The transcript is kept.</p>
+<div class="row2"><button onclick="cancelMove()">Cancel</button><button class="danger" onclick="doMove()">Move</button></div></div></div>
+<div id="confirm"><div class="cb"><h3>End this session?</h3><p><b id="cft"></b><br><br>
+Only this pane closes; other panes in the tab stay. The transcript is kept so you can resume later.</p>
+<div class="row2"><button onclick="cancelEnd()">Cancel</button><button class="danger" onclick="doEnd()">End</button></div></div></div><header>__HEAD__</header>__BODY__
 <script>
 // 보드를 어디서 열었든(file://, 오르카 탭, 크롬) 로컬 서버 주소로 직접 요청한다
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.className='on';setTimeout(function(){e.className=''},1600)}
@@ -1291,34 +1387,37 @@ function askEnd(h,btn){endTarget=h;var t=btn.closest('.box').querySelector('h2')
 function cancelEnd(){endTarget=null;document.getElementById('confirm').className=''}
 function doEnd(){var h=endTarget;cancelEnd();
   fetch('http://127.0.0.1:47613/close',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:h})
-  .then(function(){toast('세션을 끝냈습니다');location.hash='';setTimeout(function(){location.reload()},1500)})
-  .catch(function(){toast('보드 서버가 꺼져 있습니다')})}
+  .then(function(){toast('Session ended');location.hash='';setTimeout(function(){location.reload()},1500)})
+  .catch(function(){toast('Board server is not running')})}
 var WS=__WSLIST__,drag=null;
 document.addEventListener('dragstart',function(e){var c=e.target.closest&&e.target.closest('.card');if(!c)return;
   drag={h:c.dataset.h,st:c.dataset.st,wid:c.dataset.wid,title:c.dataset.title};
-  var bar=document.getElementById('dropbar');bar.innerHTML='<span>옮길 워크스페이스에 놓으세요</span>'+WS.filter(function(w){return w.id!==drag.wid})
+  var bar=document.getElementById('dropbar');bar.innerHTML='<span>Drop on a workspace</span>'+WS.filter(function(w){return w.id!==drag.wid})
     .map(function(w){return '<b data-wid="'+w.id+'">'+w.name.replace(/</g,'&lt;')+'</b>'}).join('');bar.className='on'});
 document.addEventListener('dragend',function(){setTimeout(function(){document.getElementById('dropbar').className=''},50)});
 document.addEventListener('dragover',function(e){if(e.target.closest&&e.target.closest('#dropbar b')){e.preventDefault();
   document.querySelectorAll('#dropbar b').forEach(function(b){b.classList.toggle('hot',b===e.target.closest('#dropbar b'))})}});
 document.addEventListener('drop',function(e){var b=e.target.closest&&e.target.closest('#dropbar b');if(!b||!drag)return;e.preventDefault();
-  if(drag.st!=='wait'){toast('작업 중인 세션은 멈춘 뒤에 옮길 수 있어요');return}
+  if(drag.st!=='wait'){toast('Wait until the session stops to move it');return}
   moveTarget={h:drag.h,wid:b.dataset.wid};document.getElementById('mvt').textContent=drag.title+'  →  '+b.textContent;
   document.getElementById('mconfirm').className='on'});
 var moveTarget=null;
 function cancelMove(){moveTarget=null;document.getElementById('mconfirm').className=''}
-function doMove(){var m=moveTarget;cancelMove();toast('옮기는 중…');
+function doMove(){var m=moveTarget;cancelMove();toast('Moving…');
   fetch('http://127.0.0.1:47613/move',{method:'POST',body:JSON.stringify(m)}).then(function(r){return r.text().then(function(t){toast(t);setTimeout(function(){location.reload()},2500)})})
-  .catch(function(){toast('보드 서버가 꺼져 있습니다')})}
-function cp(b,t){var d=function(){b.classList.add('ok');var o=b.textContent;b.textContent='복사됨';setTimeout(function(){b.textContent=o;b.classList.remove('ok')},1200)};
-  if(navigator.clipboard){navigator.clipboard.writeText(t).then(d,function(){prompt('복사',t)})}else{prompt('복사',t)}}
+  .catch(function(){toast('Board server is not running')})}
+function cp(b,t){var d=function(){b.classList.add('ok');var o=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=o;b.classList.remove('ok')},1200)};
+  if(navigator.clipboard){navigator.clipboard.writeText(t).then(d,function(){prompt('Copy',t)})}else{prompt('Copy',t)}}
 function tog(li){var done=!li.classList.contains('done');
   ['done','now','open','left'].forEach(function(k){li.classList.remove(k)});li.classList.add(done?'done':'open');
   var em=li.querySelector('em:not(.me)');if(em)em.remove();
   fetch('http://127.0.0.1:47613/toggle',{method:'POST',body:JSON.stringify({log:li.dataset.log,label:li.dataset.label,done:done})})
-  .catch(function(){toast('보드 서버가 꺼져 있어 저장하지 못했습니다')})}
+  .catch(function(){toast('Board server is not running; not saved')})}
+function setSum(v){fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify({summarizer:v})})
+  .then(function(r){toast(r.ok?'Summarizer saved · applies from the next update':'That model is not available')})
+  .catch(function(){toast('Board server is not running')})}
 function go(h){fetch('http://127.0.0.1:47613/switch?h='+encodeURIComponent(h),{mode:'no-cors'})
-  .then(function(){toast('오르카 창으로 이동했습니다')}).catch(function(){toast('보드 서버가 꺼져 있습니다 · progress-all 로 다시 켜 주세요')})}
+  .then(function(){toast('Switched to the Orca pane')}).catch(function(){toast('Board server is not running · restart it with ./spyhop')})}
 // 칸이 화면 높이를 넘으면 그 칸의 카드를 아래쪽부터 한 장씩, 덜 중요한 것부터 줄인다.
 // 줄이는 순서: 요약 빼기 → 마지막 답 빼기 → 단계를 막대로 → 제목 1줄. 단계가 이 보드의 핵심이라 가장 늦게 줄인다.
 // 위쪽 카드(오래 기다린 내 차례)는 끝까지 단계·마지막 답이 남는다. 창 크기가 바뀌면 전부 풀고 다시 맞춘다
@@ -1329,9 +1428,9 @@ function fit(){var lv=['lv-nosum','lv-noreply','lv-bar','lv-min'];document.query
   var over=function(){return last&&last.getBoundingClientRect().bottom>innerHeight-12};
   for(var i=0;i<lv.length&&over();i++)cards.forEach(function(k){k.classList.add(lv[i])});  // 한 칸 안의 카드는 같은 단계로 함께 줄인다
   var hid=cards.filter(function(a){return a.getBoundingClientRect().bottom>innerHeight}).length;
-  if(hid){m.textContent='↓ 아래 '+hid+'개 더';m.style.display='block'}})}
+  if(hid){m.textContent='↓ '+hid+' more below';m.style.display='block'}})}
 fit();var ft;addEventListener('resize',function(){clearTimeout(ft);ft=setTimeout(fit,120)});
-setInterval(function(){if(!location.hash||location.hash==='#')location.reload()},10000)</script>
+setInterval(function(){if((!location.hash||location.hash==='#')&&document.activeElement.id!=='sum')location.reload()},10000)</script>
 </body></html>'''
 
 if __name__ == '__main__':

@@ -27,13 +27,21 @@
 
 - macOS, Python 3.9+
 - Orca 와 `orca` CLI
-- 요약용 LLM API 키. 기본값은 DeepSeek(Anthropic 호환 엔드포인트)이며 키는 macOS 키체인에서 읽습니다.
+- 요약 모델 하나 이상. 보드 오른쪽 위 **Summarizer** 드롭다운에서 고르며, 이 맥에서 실제로 쓸 수 있는 것만 보입니다. 고른 값은 `~/.spyhop/config.json` 에 저장됩니다.
+
+| 선택지 | 필요한 것 | 대화가 가는 곳 | 속도(세션 1개) |
+|---|---|---|---|
+| DeepSeek (API) | 키체인에 `deepseek-api` 키 | DeepSeek | 약 6초 |
+| Claude Haiku (claude CLI) | 로그인된 `claude` | Anthropic | 약 15~60초 |
+| Codex (codex CLI) | 로그인된 `codex` | OpenAI | 약 15초~ |
 
 ```bash
+# DeepSeek 키 등록
 security add-generic-password -s deepseek-api -a "$USER" -w '<API 키>'
 ```
 
-모델은 `PROGRESS_BOARD_MODEL` 환경변수로 바꿀 수 있습니다(기본 `deepseek-flash`).
+Claude·Codex CLI 로 요약할 때는 요약 호출이 새 대화로 저장되지 않게 하고(`--no-session-persistence`, `--ephemeral`), 도구 실행을 막습니다. 구독 사용량을 씁니다.
+DeepSeek 모델 이름은 `PROGRESS_BOARD_MODEL` 환경변수로 바꿀 수 있습니다(기본 `deepseek-flash`).
 
 ## 실행
 

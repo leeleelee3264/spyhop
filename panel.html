@@ -56,22 +56,22 @@ font-size:11.5px;padding:5px 10px;border-radius:6px;opacity:0;transition:opacity
 .fl.st{color:#b45309;background:#fffbeb;border-color:#fcd34d}</style></head><body><div class="wrap">
 <div class="top"><div class="logo"><svg viewBox="0 0 32 32" width="22" height="22"><path d="M9.6 31 C9 23 9.8 15.6 12 10.2 C13.4 6.8 15.2 4.6 16.9 4.4 C18.7 4.3 20 6.2 20.8 9.2 C22 13.6 22.5 20 22.6 31 Z" fill="#1e293b"/><ellipse cx="23.6" cy="24.2" rx="2.8" ry="1.1" transform="rotate(-28 23.6 24.2)" fill="#1e293b"/><g fill="#ffffff"><ellipse cx="18.4" cy="12.2" rx="1.25" ry="3.1" transform="rotate(-12 18.4 12.2)"/><path d="M12.4 9.6 C11.1 13.4 10.4 19 10.6 26 L14.6 26 C14 20.2 13.7 14.8 13.9 7.6 C13.3 8.2 12.8 8.9 12.4 9.6 Z"/></g><path d="M0 25.5 Q4 23.6 8 25.5 T16 25.5 T24 25.5 T32 25.5 V32 H0 Z" fill="#94a3b8"/></svg></div>
 <b>Spyhop</b><small id="ts"></small></div>
-<div class="stats"><div class="stat wait"><span>내 차례</span><b id="nw">-</b></div>
-<div class="stat busy"><span>작업 중</span><b id="nb">-</b></div></div>
+<div class="stats"><div class="stat wait"><span>My turn</span><b id="nw">-</b></div>
+<div class="stat busy"><span>Working</span><b id="nb">-</b></div></div>
 <div id="list"></div>
-<div class="foot"><div class="btn" onclick="fetch('/open-board')">보드 크게 보기</div></div>
+<div class="foot"><div class="btn" onclick="fetch('/open-board')">Open full board</div></div>
 </div><div class="toast" id="toast"></div>
 <script>
 function esc(x){return String(x||'').replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function waited(sec){var s=Math.max(0,Date.now()/1000-sec);return s<60?'방금':s<3600?Math.floor(s/60)+'분':s<86400?Math.floor(s/3600)+'시간':Math.floor(s/86400)+'일'}
+function waited(sec){var s=Math.max(0,Date.now()/1000-sec);return s<60?'now':s<3600?Math.floor(s/60)+'m':s<86400?Math.floor(s/3600)+'h':Math.floor(s/86400)+'d'}
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('on');setTimeout(function(){e.classList.remove('on')},1200)}
-function go(h,t){fetch('/switch?h='+encodeURIComponent(h)).then(function(r){toast(r.ok?'이동: '+t:'창을 찾지 못했습니다')})}
+function go(h,t){fetch('/switch?h='+encodeURIComponent(h)).then(function(r){toast(r.ok?'Switched: '+t:'Pane not found')})}
 var pendingEnd=null;
 function end(ev,h,el){ev.stopPropagation();
-  if(pendingEnd!==h){pendingEnd=h;document.querySelectorAll('.x.ask').forEach(function(x){x.classList.remove('ask');x.textContent='끝내기'});
-    el.classList.add('ask');el.textContent='한 번 더 누르면 끝냄';setTimeout(function(){if(pendingEnd===h){pendingEnd=null;el.classList.remove('ask');el.textContent='끝내기'}},4000);return}
+  if(pendingEnd!==h){pendingEnd=h;document.querySelectorAll('.x.ask').forEach(function(x){x.classList.remove('ask');x.textContent='End'});
+    el.classList.add('ask');el.textContent='Click again to end';setTimeout(function(){if(pendingEnd===h){pendingEnd=null;el.classList.remove('ask');el.textContent='End'}},4000);return}
   pendingEnd=null;fetch('/close',{method:'POST',headers:{'Content-Type':'text/plain'},body:h})
-    .then(function(r){toast(r.ok?'세션을 끝냈습니다':'끝내지 못했습니다');setTimeout(load,1200)})}
+    .then(function(r){toast(r.ok?'Session ended':'Could not end session');setTimeout(load,1200)})}
 function render(d){
   if(pendingEnd)return;  // 확인 중에는 다시 그리지 않는다
   var ss=d.sessions||[],w=ss.filter(function(s){return s.status==='wait'}).length;
@@ -80,20 +80,20 @@ function render(d){
   function row(s){
     var cur=(s.steps||[]).filter(function(f){return f.state==='now'||f.state==='blocked'})[0];
     var bar=(s.steps||[]).map(function(f){return '<i class="'+f.state+'"></i>'}).join('');
-    var tip=[s.ws,(cur?'지금: '+cur.label:''),(s.total?s.done+'/'+s.total+' 단계':''),s.model].filter(Boolean).join(' · ');
+    var tip=[s.ws,(cur?'Now: '+cur.label:''),(s.total?s.done+'/'+s.total+' steps':''),s.model].filter(Boolean).join(' · ');
     return '<div class="row '+s.status+'" onclick="go(\''+s.handle+'\',\''+esc(s.title).replace(/'/g,'')+'\')" title="'+esc(tip)+'">'
       +'<div class="l1"><span class="t">'+esc(s.title)+'</span>'
-      +(s.fail?'<span class="fl" title="DeepSeek 정리 실패 - 마지막 성공본">정리 실패</span>':'')
-      +(s.stuck?'<span class="fl st" title="작업 중인데 대화 기록이 5분 넘게 그대로">진전 없음</span>':'')
+      +(s.fail?'<span class="fl" title="Summary failed - showing the last good one">Summary failed</span>':'')
+      +(s.stuck?'<span class="fl st" title="Working, but no transcript change for 5+ min">No progress</span>':'')
       +'<span class="w">'+waited(s.since)+'</span></div>'
       +'<div class="l2"><span class="ws">'+esc(s.ws)+'</span>'+(bar?'<div class="bar">'+bar+'</div>':'')+'</div>'
-      +'<span class="x" onclick="end(event,\''+s.handle+'\',this)">끝내기</span></div>'}
+      +'<span class="x" onclick="end(event,\''+s.handle+'\',this)">End</span></div>'}
   // 내 차례(오래 기다린 순) → 작업 중(최근 순)
   var waitL=ss.filter(function(s){return s.status==='wait'}).sort(function(a,b){return a.since-b.since});
   var busyL=ss.filter(function(s){return s.status!=='wait'}).sort(function(a,b){return b.since-a.since});
   function sec(name,list){return list.length?'<div class="sec"><h3><span>'+name+'</span><span>'+list.length+'</span></h3><div class="list">'+list.map(row).join('')+'</div></div>':''}
-  var html=sec('내 차례',waitL)+sec('작업 중',busyL);
-  document.getElementById('list').innerHTML=html||'<div class="empty">바다가 조용합니다 · 떠 있는 세션이 없습니다</div>';
+  var html=sec('My turn',waitL)+sec('Working',busyL);
+  document.getElementById('list').innerHTML=html||'<div class="empty">The sea is calm · no sessions running</div>';
 }
 function load(){fetch('/state.json',{cache:'no-store'}).then(function(r){return r.json()}).then(render).catch(function(){})}
 load();setInterval(load,5000);

@@ -52,7 +52,7 @@ def server_up():
 
 def waited(sec):
     sec = max(0, int(time.time() - sec))
-    return '방금' if sec < 60 else '%d분' % (sec // 60) if sec < 3600 else '%d시간' % (sec // 3600)
+    return 'now' if sec < 60 else '%dm' % (sec // 60) if sec < 3600 else '%dh' % (sec // 3600)
 
 
 def q(x):
@@ -91,7 +91,7 @@ def main():
         return
     print('%s | templateImage=%s width=20 height=20' % (text, ORCA_ICON))
     print('---')
-    print('내 차례 %d · 작업 중 %d | size=13' % (len(wait), len(busy)))
+    print('My turn %d · Working %d | size=13' % (len(wait), len(busy)))
 
     ws = None
     for s in ss:
@@ -101,7 +101,7 @@ def main():
             print('📁  %s | size=12' % clean(ws))
         mark = '🔴' if s['status'] == 'wait' else '🔵'
         progress = '%d/%d' % (s['done'], s['total']) if s['total'] else '—'
-        when = waited(s['since']) + (' 대기' if s['status'] == 'wait' else '')
+        when = waited(s['since']) + (' waiting' if s['status'] == 'wait' else '')
         title = clean(s['title'])
         if len(title) > 30:
             title = title[:29] + '…'
@@ -115,12 +115,12 @@ def main():
         print('-----')
         if s.get('model'):
             print('--🧠  %s | size=12' % clean(s['model']))
-        print('--↗  이 창으로 이동 | %s' % (SWITCH % s['handle']))
+        print('--↗  Go to session | %s' % (SWITCH % s['handle']))
 
     print('---')
-    print('🗂  보드 열기 | bash=/usr/bin/open param1=/tmp/progress-board/index.html terminal=false')
+    print('🗂  Open board | bash=/usr/bin/open param1=/tmp/progress-board/index.html terminal=false')
     if stale:
-        print('💤 감시 꺼짐 · Claude·Codex 를 켜면 자동으로 켜짐 | size=11')
+        print('💤 Watcher off · starts automatically when Claude/Codex runs | size=11')
 
 
 if __name__ == '__main__':
