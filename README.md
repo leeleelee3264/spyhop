@@ -47,7 +47,7 @@ DeepSeek 모델 이름은 `PROGRESS_BOARD_MODEL` 환경변수로 바꿀 수 있�
 ## 실행
 
 ```bash
-./spyhop            # 감시 프로세스를 켜고 보드를 연다 (오르카 안이면 오르카 탭으로)
+./spyhop            # 감시를 켜고, 오르카에 "Spyhop" 워크스페이스를 만들어(없으면) 그 안의 브라우저 탭으로 보드를 연다
 python3 board.py --ensure   # 감시만 켠다
 ```
 
