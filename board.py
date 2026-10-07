@@ -1021,11 +1021,11 @@ def build():
     legend = ('<div class="legend"><span><i class="lg done"></i>Done</span><span><i class="lg now"></i>Now</span>'
               '<span><i class="lg left"></i>Next</span><span><i class="lg side"></i>Intercept</span></div>')
     # 헤더는 한 줄: 로고·이름 | (범고래 물결) | 숫자 두 개 · 설정. 범례와 갱신 시각은 오른쪽 아래로 뺀다
-    head = ('<div class="brand">' + LOGO + '<b>Spyhop</b></div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' % tiles
+    head = ('<div class="brand"><b>Spyhop</b><em class="tag">all your AI sessions at a glance</em></div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' % tiles
             + GEAR + '</a></div>' + (SEA if orcas_on() else ''))
-    foot = '<div class="foot">%s<small>updated %s</small></div>' % (legend, time.strftime('%H:%M:%S'))
+    foot = '<div class="subbar">%s<small>updated %s</small></div>' % (legend, time.strftime('%H:%M:%S'))
     html = TEMPLATE.replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
-        .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals) + render_settings() + foot))
+        .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', foot + '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals) + render_settings()))
     os.makedirs(BASE, exist_ok=True)
     with open(OUT + '.tmp', 'w', encoding='utf-8') as f:
         f.write(html)
@@ -1318,8 +1318,8 @@ header{background:var(--card);border-radius:10px;padding:10px 12px;box-shadow:0 
 .brand{display:flex;align-items:center;gap:8px}.brand b{font-size:15px;letter-spacing:-.01em}.brand .logo{display:block;flex:none}
 .cnt{display:inline-flex;align-items:baseline;gap:4px;font-size:12px;font-weight:600;color:var(--st);margin-left:12px}.cnt b{font-size:16px;font-weight:800}
 .cnt.failt{--st:#dc2626}.tiles{align-items:center}
-.foot{position:fixed;right:14px;bottom:8px;z-index:5;display:flex;align-items:center;gap:12px;font-size:10.5px;color:var(--ink3);
-background:color-mix(in srgb,var(--bg) 88%,transparent);padding:3px 9px;border-radius:7px}.foot .legend{margin:0}
+.subbar{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin:-12px 4px 10px;font-size:10.5px;color:var(--ink3)}.subbar .legend{margin:0}
+.brand .tag{font-style:normal;font-size:11px;font-weight:500;color:var(--ink3);margin-left:2px}
 .tiles{display:flex;gap:6px}.tile{min-width:62px;text-align:center;border-radius:8px;padding:4px 8px;
 background:color-mix(in srgb,var(--st) 10%,var(--card));border:1px solid color-mix(in srgb,var(--st) 30%,transparent)}
 .tile b{display:block;font-size:20px;line-height:1.1;color:var(--st)}.tile span{font-size:10.5px;font-weight:600;color:var(--st)}
@@ -1533,7 +1533,7 @@ function fit(){var lv=['lv-nosum','lv-noreply','lv-bar','lv-min'];document.query
   var cards=[].slice.call(c.querySelectorAll('.card')).reverse(),m=c.querySelector('.more');m.style.display='none';
   cards.forEach(function(k){lv.forEach(function(x){k.classList.remove(x)})});
   var last=cards[0];  // 칸은 가장 긴 칸 높이로 늘어나므로 칸 끝이 아니라 마지막 카드 끝으로 잰다
-  var over=function(){return last&&last.getBoundingClientRect().bottom>innerHeight-34};
+  var over=function(){return last&&last.getBoundingClientRect().bottom>innerHeight-12};
   for(var i=0;i<lv.length&&over();i++)cards.forEach(function(k){k.classList.add(lv[i])});  // 한 칸 안의 카드는 같은 단계로 함께 줄인다
   var hid=cards.filter(function(a){return a.getBoundingClientRect().bottom>innerHeight}).length;
   if(hid){m.textContent='↓ '+hid+' more below';m.style.display='block'}})}
