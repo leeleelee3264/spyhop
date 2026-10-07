@@ -1013,18 +1013,19 @@ def build():
                     % (col_head(ws, cards), ''.join(c for _, c in sorted(cards, key=lambda x: x[0])))
                     for (_, ws), cards in sorted(cols.items(), key=lambda x: -x[0][0]))
     nfail = sum(1 for t in terms if t.get('_fail'))
-    tiles = ''.join('<div class="tile %s"><b>%d</b><span>%s</span></div>' % (k, count[k], LABEL[k])
-                    for k in ('wait', 'busy'))
+    tiles = ''.join('<span class="cnt %s"><b>%d</b>%s</span>' % (k, count[k], LABEL[k]) for k in ('wait', 'busy'))
     if nfail:
-        tiles += '<div class="tile failt" title="Sessions whose summary failed (showing the last good one)"><b>%d</b><span>Failed</span></div>' % nfail
+        tiles += '<span class="cnt failt" title="Sessions whose summary failed (showing the last good one)"><b>%d</b>Failed</span>' % nfail
     wslist = json.dumps([{'id': w['id'], 'name': w.get('displayName') or os.path.basename(w.get('path', ''))}
                          for w in worktrees.values() if not w.get('isArchived')], ensure_ascii=False)
     legend = ('<div class="legend"><span><i class="lg done"></i>Done</span><span><i class="lg now"></i>Now</span>'
               '<span><i class="lg left"></i>Next</span><span><i class="lg side"></i>Intercept</span></div>')
-    head = (('<div class="brand"><b>Spyhop <em class="tag">all your AI sessions at a glance</em></b><small>updated %s</small>' + legend + '</div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' + GEAR + '</a></div>')
-            % (time.strftime('%H:%M:%S'), tiles)) + (SEA if orcas_on() else '')
+    # 헤더는 한 줄: 로고·이름 | (범고래 물결) | 숫자 두 개 · 설정. 범례와 갱신 시각은 오른쪽 아래로 뺀다
+    head = ('<div class="brand">' + LOGO + '<b>Spyhop</b></div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' % tiles
+            + GEAR + '</a></div>' + (SEA if orcas_on() else ''))
+    foot = '<div class="foot">%s<small>updated %s</small></div>' % (legend, time.strftime('%H:%M:%S'))
     html = TEMPLATE.replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
-        .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals) + render_settings()))
+        .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals) + render_settings() + foot))
     os.makedirs(BASE, exist_ok=True)
     with open(OUT + '.tmp', 'w', encoding='utf-8') as f:
         f.write(html)
@@ -1266,6 +1267,8 @@ def current_theme():
     return t if t in [x[0] for x in THEMES] else 'classic'
 
 
+LOGO = '<svg viewBox="0 0 32 32" width="24" height="24" class="logo"><clipPath id="lg"><rect width="32" height="32" rx="8"/></clipPath><g clip-path="url(#lg)"><rect width="32" height="32" fill="#e2e8f0"/><path d="M9.6 31 C9 23 9.8 15.6 12 10.2 C13.4 6.8 15.2 4.6 16.9 4.4 C18.7 4.3 20 6.2 20.8 9.2 C22 13.6 22.5 20 22.6 31 Z" fill="#1e293b"/><ellipse cx="23.6" cy="24.2" rx="2.8" ry="1.1" transform="rotate(-28 23.6 24.2)" fill="#1e293b"/><g fill="#ffffff"><ellipse cx="18.4" cy="12.2" rx="1.25" ry="3.1" transform="rotate(-12 18.4 12.2)"/><path d="M12.4 9.6 C11.1 13.4 10.4 19 10.6 26 L14.6 26 C14 20.2 13.7 14.8 13.9 7.6 C13.3 8.2 12.8 8.9 12.4 9.6 Z"/></g><path d="M0 25.5 Q4 23.6 8 25.5 T16 25.5 T24 25.5 T32 25.5 V32 H0 Z" fill="#94a3b8"/></g></svg>'
+
 GEAR = ('<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
         '<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 '
         '2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051'
@@ -1312,7 +1315,11 @@ TEMPLATE = '''<!doctype html><html lang="ko"><head><meta charset="utf-8">
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 -apple-system,"Apple SD Gothic Neo",sans-serif;padding:12px}
 header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:8px;flex-wrap:wrap}
 header{background:var(--card);border-radius:10px;padding:10px 12px;box-shadow:0 1px 1px rgba(9,30,66,.15)}
-.brand b{display:block;font-size:15px;letter-spacing:-.01em}.brand small{color:var(--ink3);font-size:11px}
+.brand{display:flex;align-items:center;gap:8px}.brand b{font-size:15px;letter-spacing:-.01em}.brand .logo{display:block;flex:none}
+.cnt{display:inline-flex;align-items:baseline;gap:4px;font-size:12px;font-weight:600;color:var(--st);margin-left:12px}.cnt b{font-size:16px;font-weight:800}
+.cnt.failt{--st:#dc2626}.tiles{align-items:center}
+.foot{position:fixed;right:14px;bottom:8px;z-index:5;display:flex;align-items:center;gap:12px;font-size:10.5px;color:var(--ink3);
+background:color-mix(in srgb,var(--bg) 88%,transparent);padding:3px 9px;border-radius:7px}.foot .legend{margin:0}
 .tiles{display:flex;gap:6px}.tile{min-width:62px;text-align:center;border-radius:8px;padding:4px 8px;
 background:color-mix(in srgb,var(--st) 10%,var(--card));border:1px solid color-mix(in srgb,var(--st) 30%,transparent)}
 .tile b{display:block;font-size:20px;line-height:1.1;color:var(--st)}.tile span{font-size:10.5px;font-weight:600;color:var(--st)}
@@ -1526,7 +1533,7 @@ function fit(){var lv=['lv-nosum','lv-noreply','lv-bar','lv-min'];document.query
   var cards=[].slice.call(c.querySelectorAll('.card')).reverse(),m=c.querySelector('.more');m.style.display='none';
   cards.forEach(function(k){lv.forEach(function(x){k.classList.remove(x)})});
   var last=cards[0];  // 칸은 가장 긴 칸 높이로 늘어나므로 칸 끝이 아니라 마지막 카드 끝으로 잰다
-  var over=function(){return last&&last.getBoundingClientRect().bottom>innerHeight-12};
+  var over=function(){return last&&last.getBoundingClientRect().bottom>innerHeight-34};
   for(var i=0;i<lv.length&&over();i++)cards.forEach(function(k){k.classList.add(lv[i])});  // 한 칸 안의 카드는 같은 단계로 함께 줄인다
   var hid=cards.filter(function(a){return a.getBoundingClientRect().bottom>innerHeight}).length;
   if(hid){m.textContent='↓ '+hid+' more below';m.style.display='block'}})}
