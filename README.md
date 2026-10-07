@@ -1,9 +1,23 @@
-# Spyhop
+<p align="center">
+  <img src="docs/logo.svg" width="112" alt="Spyhop logo">
+</p>
 
-> *Spyhop*: when an orca pokes its head straight out of the water to look around.
+<h1 align="center">Spyhop</h1>
 
-**Spyhop shows every AI coding session you have running — Claude Code and Codex — on one board.**
-For each session you see what it is working on, how far it has come, and whether it is waiting for you.
+<p align="center">
+  <b>Every AI coding session you have running, on one board.</b><br>
+  <sub>What each Claude Code and Codex session is doing, how far it has come, and whether it is waiting for you.</sub>
+</p>
+
+<p align="center">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-only-1e293b?logo=apple&logoColor=white">
+  <img alt="Python 3.9+" src="https://img.shields.io/badge/python-3.9%2B-1e293b?logo=python&logoColor=white">
+  <img alt="Claude Code" src="https://img.shields.io/badge/Claude%20Code-supported-1e293b">
+  <img alt="Codex" src="https://img.shields.io/badge/Codex-supported-1e293b">
+  <img alt="Orca" src="https://img.shields.io/badge/Orca-workspaces-1e293b">
+</p>
+
+<p align="center"><i>Spyhop: when an orca pokes its head straight out of the water to look around.</i></p>
 
 ![Board](docs/screenshots/board.png)
 
