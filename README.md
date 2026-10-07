@@ -21,11 +21,38 @@
 
 ![Board](docs/screenshots/board.png)
 
-It is built for [Orca](https://github.com/stablyai/orca): each Orca workspace becomes a column, and each pane running an agent becomes a card.
+## Quick start
+
+```bash
+git clone https://github.com/leeleelee3264/spyhop.git
+cd spyhop
+./spyhop
+```
+
+- **That's all if you already use [Orca](https://github.com/stablyai/orca) and are logged in to the `claude` CLI.** No `pip install`: Spyhop uses only the Python standard library.
+- **Without Orca the board stays empty.** Spyhop finds sessions through Orca today (see [TODO](#todo)).
+- The board opens at **http://127.0.0.1:47613/**. With Orca it also gets its own **Spyhop** workspace with the board in a browser tab.
+
+## At a glance
+
+| | |
+|---|---|
+| What | A local web board of every Claude Code / Codex session running in Orca |
+| Platform | macOS, Python 3.9+ (standard library only) |
+| Needs | `orca` CLI on `PATH` · one summarizer: `claude` or `codex` logged in, or a DeepSeek API key |
+| Start | `./spyhop` (or turn on **Start at login** in Settings) |
+| Stop | `pkill -f "board.py --watch"` · it also stops by itself after 30 minutes with no sessions |
+| Is it running? | `curl -s http://127.0.0.1:47613/state.json` returns JSON |
+| Logs | `/tmp/progress-board/watch.log` · `~/Library/Logs/spyhop.log` when started at login |
+| Settings / groups | `~/.spyhop/config.json` · `~/.spyhop/groups.json` |
+| Cached summaries | `/tmp/progress-board/auto/<transcript>.json` (delete one to re-summarize that session from scratch) |
+| Port | `127.0.0.1:47613` (local only) |
 
 ## Features
 
 ### Board
+
+Built for Orca: each Orca workspace becomes a column, and each pane running an agent becomes a card.
 
 - **One card per session** with the title of the task, the model, and how long it has been waiting or working.
 - **Steps** read top to bottom: `Done` · `Now` · `Next`, plus purple **Intercept** for a quick side task handled in the middle of the main one.
@@ -53,7 +80,7 @@ Click the gear icon.
 
 | Setting | What it does |
 |---|---|
-| Summarizer | The model that writes titles, steps and TODOs. Only models available on your Mac are listed (see below). |
+| Summarizer | The model that writes titles, steps and TODOs. Only models available on your Mac are listed. |
 | Theme | Classic (follows macOS dark mode), Material Indigo, Teal, You, Dark, Blue Grey. |
 | Group by | Orca workspace or AI topics. |
 | Orca animation | Little orcas spyhop out of the wave in the header. |
@@ -69,59 +96,43 @@ With [SwiftBar](https://github.com/swiftbar/SwiftBar), an orca icon in the menu 
 
 <img src="docs/screenshots/panel.png" width="320" alt="Menu bar panel">
 
-## Requirements
+## Requirements in detail
 
-- macOS and Python 3.9+
-- [Orca](https://github.com/stablyai/orca) with the `orca` CLI on your `PATH`
-  - Spyhop currently finds sessions through Orca. A mode that works without Orca is planned.
-- At least one summarizer:
+- **macOS** and **Python 3.9+**. No third-party packages.
+- **[Orca](https://github.com/stablyai/orca)** with the `orca` CLI on your `PATH`.
+- **One summarizer.** Spyhop uses the first one available (DeepSeek, then Claude, then Codex). Change it any time in Settings.
 
 | Summarizer | Models you can pick | What you need | Where transcripts go |
 |---|---|---|---|
-| DeepSeek (API) | DeepSeek flash | An API key in the macOS keychain | DeepSeek |
 | Claude (claude CLI) | Haiku, Sonnet, Opus, Fable — current models plus any found in your transcripts | `claude` installed and logged in | Anthropic |
 | Codex (codex CLI) | Models listed in `~/.codex/models_cache.json` | `codex` installed and logged in | OpenAI |
+| DeepSeek (API) | DeepSeek flash | An API key in the macOS keychain (below) | DeepSeek |
 
 ```bash
-# DeepSeek: store the key in the keychain
+# DeepSeek only: store the key in the keychain
 security add-generic-password -s deepseek-api -a "$USER" -w '<your API key>'
 ```
 
-When Claude or Codex CLI is the summarizer, Spyhop runs them without saving the summary call as a new conversation and with tools disabled. It uses your subscription.
+When Claude or Codex CLI is the summarizer, Spyhop runs them without saving the summary call as a new conversation and with tools disabled. It uses your subscription. DeepSeek is the fastest (about 6 s per session).
 
-## Install
+## What `./spyhop` does
 
-```bash
-git clone https://github.com/leeleelee3264/spyhop.git
-cd spyhop
-./spyhop
-```
+- Starts the board process in the background (only one ever runs).
+- **With Orca running**: registers a small project `~/.spyhop` (an empty git repo, because Orca only registers git repos from the CLI) with a **Spyhop** workspace, and opens the board in a browser tab there. Your own repositories are never touched.
+- **Without Orca running**: opens the board in your default browser.
 
-`./spyhop` starts the board in the background and opens it:
-
-- **With Orca**: it adds a small project `~/.spyhop` (an empty git repo, because Orca only registers git repos from the CLI) with a **Spyhop** workspace, and opens the board in a browser tab there. Your own repositories are never touched.
-- **Without Orca running**: it opens the board in your default browser.
-
-The board is served at **http://127.0.0.1:47613/** (menu bar panel: `/panel`).
-
-### Start at login (optional)
-
-Turn on **Start at login** in Settings, or:
+Options:
 
 ```bash
-./spyhop --autostart      # register a LaunchAgent
+./spyhop --autostart      # start at login (LaunchAgent); same as the Settings switch
 ./spyhop --no-autostart   # remove it
 ```
 
-### Menu bar (optional)
-
-Install SwiftBar, then link the plugin into its plugin folder:
+Menu bar (optional): install SwiftBar, then link the plugin into its plugin folder. The plugin also restarts the board when Claude or Codex is running.
 
 ```bash
 ln -s "$PWD/menubar/spyhop.5s.py" "<SwiftBar plugin folder>/spyhop.5s.py"
 ```
-
-The plugin also restarts the board when Claude or Codex is running.
 
 ## When it runs
 
@@ -130,7 +141,7 @@ The plugin also restarts the board when Claude or Codex is running.
 | Starts | `./spyhop` · at login (if enabled) · when Claude or Codex is running (menu bar plugin checks every 5 s) |
 | Stops | After 30 minutes with no AI sessions open, to save resources |
 
-Only one board process runs at a time. The Orca tab opens `~/.spyhop/open.html`, which shows "Starting the board…" while the server is down and loads the board as soon as it is up.
+The Orca tab opens `~/.spyhop/open.html`, which shows "Starting the board…" while the server is down and loads the board as soon as it is up.
 
 Typical cost on a Mac with ~6 sessions: about 70–80 MB of memory and around 1% of total CPU at the 10-second interval.
 
@@ -153,11 +164,11 @@ Typical cost on a Mac with ~6 sessions: about 70–80 MB of memory and around 1%
 
 | File | Role |
 |---|---|
+| `spyhop` | Launcher (start, open, `--autostart`) |
 | `board.py` | Session discovery, summaries, board HTML, local server, settings |
 | `panel.html` | Menu bar panel |
 | `menubar/spyhop.5s.py` | SwiftBar plugin |
 | `orca_art.py` | Orca icon and animation art |
-| `spyhop` | Launcher |
 | `tools/demo_screens.py` | Regenerates the screenshots in `docs/screenshots` from demo data |
 
 ## TODO
