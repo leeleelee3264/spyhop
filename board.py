@@ -296,7 +296,7 @@ def summarize(path):
     if os.path.exists(cache):
         with open(cache, encoding='utf-8') as f:
             old = json.load(f)
-        fresh = time.time() - old.get('at', 0) < RESUMMARIZE
+        fresh = time.time() - old.get('at', 0) < resum_sec()
         if old.get('size') == size or fresh:
             return old
     try:
@@ -1022,9 +1022,9 @@ def build():
                          for w in worktrees.values() if not w.get('isArchived')], ensure_ascii=False)
     legend = ('<div class="legend"><span><i class="lg done"></i>Done</span><span><i class="lg now"></i>Now</span>'
               '<span><i class="lg left"></i>Next</span></div>')
-    head = (('<div class="brand"><b>Spyhop <em class="tag">all your AI sessions at a glance</em></b><small>%d sessions · updated %s</small>' + legend + '</div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' + GEAR + '</a></div>')
-            % (len(terms), time.strftime('%H:%M:%S'), tiles)) + SEA
-    html = TEMPLATE.replace('__THEME_CSS__', THEME_CSS).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
+    head = (('<div class="brand"><b>Spyhop <em class="tag">all your AI sessions at a glance</em></b><small>updated %s</small>' + legend + '</div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' + GEAR + '</a></div>')
+            % (time.strftime('%H:%M:%S'), tiles)) + (SEA if orcas_on() else '')
+    html = TEMPLATE.replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
         .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals) + render_settings()))
     os.makedirs(BASE, exist_ok=True)
     with open(OUT + '.tmp', 'w', encoding='utf-8') as f:
@@ -1087,6 +1087,11 @@ def serve():
         def do_POST(self):
             if urlparse(self.path).path == '/config':
                 req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
+                for key, allowed in (('refresh', REFRESH_OPTS), ('resummarize', RESUM_OPTS), ('orcas', (True, False))):
+                    if key in req:
+                        if req[key] not in allowed:
+                            return self.send(400, b'bad value')
+                        save_config(**{key: req[key]})
                 if 'theme' in req:
                     if req['theme'] not in [x[0] for x in THEMES]:
                         return self.send(400, b'unknown theme')
@@ -1200,7 +1205,7 @@ def watch():
                 last_seen = time.time()
         except Exception as e:
             sys.stderr.write('board: %s\n' % e)
-        time.sleep(INTERVAL)
+        time.sleep(refresh_sec())
 
 
 def main(argv):
@@ -1236,6 +1241,27 @@ CLASSIC_PREVIEW = ('.thp[data-theme="classic"]{--bg:#f4f5f8;--col:#ebecf0;--card
 THEME_CSS = CLASSIC_PREVIEW + ''.join('[data-theme="%s"]{%s}' % (tid, ';'.join('--%s:%s' % kv for kv in v.items())) for tid, _, v in THEMES if v)
 
 
+REFRESH_OPTS = (10, 30, 60)          # 보드를 다시 그리는 주기(초)
+RESUM_OPTS = (60, 180, 300)          # 세션 하나를 다시 정리하는 최소 간격(초)
+
+
+def opt(key, allowed, default):
+    v = load_config().get(key, default)
+    return v if v in allowed else default
+
+
+def refresh_sec():
+    return opt('refresh', REFRESH_OPTS, 10)
+
+
+def resum_sec():
+    return opt('resummarize', RESUM_OPTS, 60)
+
+
+def orcas_on():
+    return load_config().get('orcas', True) is not False
+
+
 def current_theme():
     t = load_config().get('theme', 'classic')
     return t if t in [x[0] for x in THEMES] else 'classic'
@@ -1264,7 +1290,20 @@ def render_settings():
     return ('<div class="modal" id="settings"><a class="bg" href="#"></a><div class="box set">'
             '<div class="row"><b class="stt">Settings</b><a class="x" href="#">Close ✕</a></div>'
             '<h4>Summarizer</h4><p class="hint">The model that writes titles, steps and TODOs. Only models available on this Mac are listed.</p>'
-            '<div class="opts">%s</div><h4>Theme</h4><div class="ths">%s</div></div></div>' % (sums, cards))
+            '<div class="opts">%s</div><h4>Theme</h4><div class="ths">%s</div>'
+            '<h4>Display</h4><label class="opt tog"><input type="checkbox"%s onchange="setCfg({orcas:this.checked})">'
+            '<span><b>Orca animation</b><small>Orcas spyhop out of the waves in the header now and then</small></span></label>'
+            '<h4>Updates</h4><div class="seg2"><span>Refresh board every</span>%s</div>'
+            '<div class="seg2"><span>Re-summarize a session at most every</span>%s</div>'
+            '<p class="hint">Longer intervals use less CPU and fewer model calls.</p></div></div>'
+            % (sums, cards, ' checked' if orcas_on() else '',
+               pills('refresh', REFRESH_OPTS, refresh_sec(), lambda v: '%ds' % v),
+               pills('resummarize', RESUM_OPTS, resum_sec(), lambda v: '%d min' % (v // 60))))
+
+
+def pills(key, values, cur, fmt):
+    return '<div class="pills">%s</div>' % ''.join(
+        '<button class="%s" onclick="setCfg({%s:%d},this)">%s</button>' % ('on' if v == cur else '', key, v, fmt(v)) for v in values)
 
 
 TEMPLATE = '''<!doctype html><html lang="ko"><head><meta charset="utf-8">
@@ -1427,7 +1466,7 @@ border-radius:12px;padding:10px;gap:8px;flex-wrap:wrap;align-items:center;box-sh
 ::-webkit-scrollbar-corner{background:transparent}
 
 header{position:relative;overflow:hidden}.brand .tag{font-style:normal;font-size:11px;font-weight:500;color:var(--ink3);margin-left:6px}.sea{position:absolute;left:0;right:0;bottom:0;height:44px;pointer-events:none;overflow:hidden}.sea:after{content:"";position:absolute;left:0;right:0;bottom:2px;height:6px;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2232%22%20height%3D%226%22%20viewBox%3D%220%200%2032%206%22%3E%3Cpath%20d%3D%22M0%203%20Q4%200.5%208%203%20T16%203%20T24%203%20T32%203%22%20fill%3D%22none%22%20stroke%3D%22%23cbd5e1%22%20stroke-width%3D%221.4%22/%3E%3C/svg%3E") repeat-x;opacity:.7}.orca{position:absolute;bottom:-1px;width:36px;height:36px;transform:translateY(100%);animation:spy 3.4s ease-in-out forwards}@keyframes spy{0%{transform:translateY(100%) rotate(-8deg)}28%{transform:translateY(6%) rotate(0)}72%{transform:translateY(6%) rotate(4deg)}100%{transform:translateY(100%) rotate(-4deg)}}@media (prefers-reduced-motion:reduce){.orca{display:none}}
-.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.ths{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:7px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:74px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
+.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:4px 11px;font-size:11.5px;color:var(--ink2)}.pills button+button{border-left:1px solid var(--line)}.pills button.on{background:color-mix(in srgb,var(--wait) 14%,var(--card));color:var(--ink);font-weight:700}.ths{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:7px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:74px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
 <div id="dropbar"></div>
 <div id="mconfirm"><div class="cb"><h3>Move to another workspace?</h3><p><b id="mvt"></b><br><br>
 Closes this pane and resumes the same conversation in a split next to the target workspace. The transcript is kept.</p>
@@ -1470,6 +1509,10 @@ function tog(li){var done=!li.classList.contains('done');
   var em=li.querySelector('em:not(.me)');if(em)em.remove();
   fetch('http://127.0.0.1:47613/toggle',{method:'POST',body:JSON.stringify({log:li.dataset.log,label:li.dataset.label,done:done})})
   .catch(function(){toast('Board server is not running; not saved')})}
+function setCfg(o,btn){if(btn){btn.parentNode.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',b===btn)})}
+  fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify(o)})
+  .then(function(r){toast(r.ok?'Saved':'Could not save');if(r.ok&&'orcas' in o){var s=document.querySelector('.sea');if(s)s.style.display=o.orcas?'':'none'}})
+  .catch(function(){toast('Board server is not running')})}
 function setTheme(t){document.documentElement.dataset.theme=t;
   document.querySelectorAll('.th').forEach(function(b){b.classList.toggle('on',b.dataset.id===t)});
   fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify({theme:t})}).catch(function(){toast('Board server is not running')})}
@@ -1490,7 +1533,7 @@ function fit(){var lv=['lv-nosum','lv-noreply','lv-bar','lv-min'];document.query
   var hid=cards.filter(function(a){return a.getBoundingClientRect().bottom>innerHeight}).length;
   if(hid){m.textContent='↓ '+hid+' more below';m.style.display='block'}})}
 fit();var ft;addEventListener('resize',function(){clearTimeout(ft);ft=setTimeout(fit,120)});
-setInterval(function(){if((!location.hash||location.hash==='#'))location.reload()},10000)</script>
+setInterval(function(){if((!location.hash||location.hash==='#'))location.reload()},__REFRESH_MS__)</script>
 </body></html>'''
 
 if __name__ == '__main__':
