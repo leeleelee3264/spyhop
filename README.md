@@ -36,33 +36,90 @@ cd spyhop
 
 - You need [Orca](https://github.com/stablyai/orca) and the `claude` CLI logged in. Nothing else: no `pip install`.
 - **Without Orca the board stays empty** — Spyhop finds sessions through Orca today.
-- The board opens in a **Spyhop** workspace in Orca, at `http://127.0.0.1:47613/`.
+- The board opens in Orca, in a **Spyhop** workspace under a small `~/.spyhop` project that Spyhop creates for itself (your own repositories are never touched). It is also at `http://127.0.0.1:47613/`.
+
+## AI summarizer
+
+Spyhop reads each session's transcript and asks an AI model to write the card: title, steps and TODOs.
+You can use whichever of these you already have. Pick one in **Settings → Summarizer**; only the ones available on your Mac are listed.
+
+| Summarizer | Models | What you need | Where transcripts go |
+|---|---|---|---|
+| Claude (claude CLI) | Haiku, Sonnet, Opus, Fable | `claude` installed and logged in | Anthropic |
+| Codex (codex CLI) | Models in your Codex model list | `codex` installed and logged in | OpenAI |
+| DeepSeek (API) | DeepSeek flash | An API key in the macOS keychain (below) | DeepSeek |
+
+- Out of the box Spyhop uses the first one it finds. If you only have the `claude` CLI, that is what it uses — the DeepSeek key is optional.
+- Claude and Codex run through your existing login and subscription. Spyhop runs them with tools disabled and without saving the summary call as a new conversation.
+- DeepSeek is the fastest (about 6 s per session). To use it, store your key once:
+
+```bash
+security add-generic-password -s deepseek-api -a "$USER" -w '<your API key>'
+```
+
+Before anything is sent, strings that look like keys, tokens and passwords are masked. It is a best-effort filter — pick a model your organization allows.
 
 ## Features
 
-- **Cards with steps** — `Done` · `Now` · `Next`, plus purple **Intercept** for a quick side task in the middle of the main one.
-- **My turn / Working** — sessions waiting for you sit at the top. A **No progress** badge appears when a working session hasn't moved for 5 minutes.
-- **Detail view** — every step explained, the last reply, a TODO checklist, and the session ID to resume.
-- **Group by AI topics** — instead of Orca workspaces, let the AI sort sessions into up to six topics. Drag a card to pin it to another group.
-- **Settings** — summarizer model, theme, grouping, start at login, update interval, and the board's own CPU and memory.
-- **Menu bar** (optional, with [SwiftBar](https://github.com/swiftbar/SwiftBar)) — an orca icon with the number of sessions waiting for you.
+### Board
 
-| Detail view | Settings |
-|---|---|
-| ![Detail](docs/screenshots/detail.png) | ![Settings](docs/screenshots/settings.png) |
+Each Orca workspace is a column and each session is a card.
 
-| AI topics | Menu bar |
+- **Steps** read top to bottom: `Done` · `Now` · `Next`, plus purple **Intercept** for a quick side task handled in the middle of the main one.
+- **My turn / Working** counts sit in the header, and sessions waiting for you are at the top of each column.
+- A **No progress** badge appears when a working session hasn't written anything for 5 minutes — a long test run, or a stuck tool.
+- When the window is short, the cards in a column shrink together into progress bars.
+
+### Detail view
+
+Click a card to see every step with a one-line explanation, the last reply, a TODO checklist you can tick yourself, the raw last request and reply, and the session ID (click to copy `claude --resume <id>` / `codex resume <id>`). From here you can jump to the session or end it.
+
+![Detail](docs/screenshots/detail.png)
+
+### Group by AI topics
+
+Instead of Orca workspaces, let the AI sort sessions into up to six topics. Groups stay once assigned, and dragging a card onto another group pins it there. While new sessions are being sorted, a small spinner shows "Grouping N sessions by topic…".
+
+![AI groups](docs/screenshots/ai-groups.png)
+
+### Settings
+
+Click the gear icon in the header.
+
+| Setting | What it does |
 |---|---|
-| ![AI groups](docs/screenshots/ai-groups.png) | <img src="docs/screenshots/panel.png" width="260" alt="Menu bar panel"> |
+| Summarizer | The AI model that writes the cards (see above). |
+| Theme | Classic (follows macOS dark mode), Material Indigo, Teal, You, Dark, Blue Grey. |
+| Group by | Orca workspace or AI topics. |
+| Orca animation | Little orcas spyhop out of the wave in the header. |
+| Start at login | Starts the board when you log in to the Mac. Off by default. |
+| Update every | 10 / 30 / 60 seconds. Longer means less CPU and fewer model calls. |
+| Resource usage | Live CPU and memory of the board itself. |
+
+![Settings](docs/screenshots/settings.png)
+
+### Menu bar (optional)
+
+An orca icon in the menu bar shows how many sessions are waiting for you. Click it for a compact list — sessions waiting for you first — and click a row to jump to that session.
+
+<img src="docs/screenshots/panel.png" width="320" alt="Menu bar panel">
+
+To add it, install [SwiftBar](https://github.com/swiftbar/SwiftBar) and link the plugin into SwiftBar's plugin folder:
+
+```bash
+ln -s "$PWD/menubar/spyhop.5s.py" "<SwiftBar plugin folder>/spyhop.5s.py"
+```
+
+The plugin also starts the board whenever Claude or Codex is running.
 
 ## Uninstall
 
-Turn off **Start at login** in Settings, delete the repo folder and `~/.spyhop`, and remove the **.spyhop** project from Orca's sidebar.
+Turn off **Start at login** in Settings, delete the repo folder and `~/.spyhop`, remove the **.spyhop** project from Orca's sidebar, and remove the SwiftBar link if you added one.
 The board stops by itself within 30 minutes once no sessions are open.
 
 ## More
 
-Summarizer options (Claude, Codex, DeepSeek), the menu bar plugin, how it works, privacy and file locations: [docs/details.md](docs/details.md).
+How it works, when it runs, privacy and file locations: [docs/details.md](docs/details.md).
 
 ## TODO
 

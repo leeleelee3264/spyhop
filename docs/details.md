@@ -1,6 +1,6 @@
 # Spyhop details
 
-Everything that does not need to be in the README.
+Reference for things the README doesn't need to say.
 
 ## At a glance
 
@@ -17,47 +17,14 @@ Everything that does not need to be in the README.
 | Cached summaries | `/tmp/progress-board/auto/<transcript>.json` (delete one to re-summarize that session from scratch) |
 | Port | `127.0.0.1:47613` (local only) |
 
-## Summarizers
-
-Spyhop uses the first summarizer available (DeepSeek, then Claude, then Codex; the DeepSeek key is optional). Change it in Settings; only models available on your Mac are listed.
-
-| Summarizer | Models you can pick | What you need | Where transcripts go |
-|---|---|---|---|
-| Claude (claude CLI) | Haiku, Sonnet, Opus, Fable — current models plus any found in your transcripts | `claude` installed and logged in | Anthropic |
-| Codex (codex CLI) | Models listed in `~/.codex/models_cache.json` | `codex` installed and logged in | OpenAI |
-| DeepSeek (API) | DeepSeek flash | An API key in the macOS keychain | DeepSeek |
-
-```bash
-# DeepSeek only: store the key in the keychain
-security add-generic-password -s deepseek-api -a "$USER" -w '<your API key>'
-```
-
-When Claude or Codex CLI is the summarizer, Spyhop runs them without saving the summary call as a new conversation and with tools disabled. It uses your subscription. DeepSeek is the fastest (about 6 s per session).
-
-## What `./spyhop` does
-
-- Starts the board process in the background. Only one ever runs.
-- **With Orca running**: registers a small project `~/.spyhop` (an empty git repo, because Orca only registers git repos from the CLI) with a **Spyhop** workspace, and opens the board in a browser tab there. Your own repositories are never touched.
-- **Without Orca running**: opens the board in your default browser.
-
-The Orca tab opens `~/.spyhop/open.html`, which shows "Starting the board…" while the server is down and loads the board as soon as it is up.
-
-## Menu bar (optional)
-
-Install [SwiftBar](https://github.com/swiftbar/SwiftBar), then link the plugin into its plugin folder:
-
-```bash
-ln -s "$PWD/menubar/spyhop.5s.py" "<SwiftBar plugin folder>/spyhop.5s.py"
-```
-
-An orca icon shows how many sessions are waiting for you; click it for a compact list. The plugin also starts the board when Claude or Codex is running.
-
 ## When it runs
 
 | | When |
 |---|---|
 | Starts | `./spyhop` · at login (if turned on in Settings) · when Claude or Codex is running (menu bar plugin checks every 5 s) |
 | Stops | After 30 minutes with no AI sessions open, to save resources |
+
+Only one board process runs at a time. The Orca tab opens `~/.spyhop/open.html`, which shows "Starting the board…" while the board is down and loads it as soon as it is up.
 
 Typical cost on a Mac with ~6 sessions: about 70–80 MB of memory and around 1% of total CPU at the 10-second interval.
 
@@ -70,11 +37,14 @@ Typical cost on a Mac with ~6 sessions: about 70–80 MB of memory and around 1%
    - Each session is re-summarized at most once per 1–5 minutes, depending on the update interval.
 4. It renders the board and serves it on `127.0.0.1`.
 
+Claude models offered in Settings are the current ones plus any found in your recent transcripts. Codex models come from `~/.codex/models_cache.json`.
+
 ## Privacy
 
-- Transcripts are sent to the summarizer you pick. Before sending, Spyhop masks strings that look like AWS keys, API tokens, JWTs and `password=` values. This is a best-effort filter, not a guarantee — pick a model your organization allows.
+- Transcripts are sent to the summarizer you pick. Before sending, Spyhop masks strings that look like AWS keys, API tokens, JWTs and `password=` values. This is a best-effort filter, not a guarantee.
 - Summaries and state are kept in `/tmp/progress-board/`. Settings and topic groups live in `~/.spyhop/`.
 - The server listens on `127.0.0.1` only and only acts on sessions currently shown on the board.
+- `~/.spyhop` is an empty git repo only because Orca registers projects from git repos. Spyhop never touches your own repositories.
 
 ## Files
 
