@@ -683,7 +683,7 @@ def render_flow(items, busy, newest_first=True):
     show = {n for n, it in seq if it.get('state') in ('now', 'blocked', 'open')} | ({cur + 1} if cur else set())
     for n, it in (reversed(seq) if newest_first else seq):
         st = it.get('state') if it.get('state') in STATES else 'left'
-        tag = {'done': 'Done', 'now': 'Now', 'open': 'Left open', 'blocked': 'Now', 'left': 'Next', 'side': 'Detour'}[st]
+        tag = {'done': 'Done', 'now': 'Now', 'open': 'Left open', 'blocked': 'Now', 'left': 'Next', 'side': 'Intercept'}[st]
         nodes.append('<li class="n %s%s"><i>%s</i><div class="nc"><div class="nh"><span>%s</span><em>%s</em></div>%s</div></li>'
                      % (st, ' live' if busy and st == 'now' else '', '✓' if st == 'done' else n,
                         escape(it.get('label') or ''), tag,
@@ -1020,7 +1020,7 @@ def build():
     wslist = json.dumps([{'id': w['id'], 'name': w.get('displayName') or os.path.basename(w.get('path', ''))}
                          for w in worktrees.values() if not w.get('isArchived')], ensure_ascii=False)
     legend = ('<div class="legend"><span><i class="lg done"></i>Done</span><span><i class="lg now"></i>Now</span>'
-              '<span><i class="lg left"></i>Next</span><span><i class="lg side"></i>Detour</span></div>')
+              '<span><i class="lg left"></i>Next</span><span><i class="lg side"></i>Intercept</span></div>')
     head = (('<div class="brand"><b>Spyhop <em class="tag">all your AI sessions at a glance</em></b><small>updated %s</small>' + legend + '</div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' + GEAR + '</a></div>')
             % (time.strftime('%H:%M:%S'), tiles)) + (SEA if orcas_on() else '')
     html = TEMPLATE.replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
