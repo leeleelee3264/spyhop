@@ -1478,11 +1478,6 @@ def main(argv):
     if '--watch' in argv:
         watch()
         return
-    if '--autostart' in argv:
-        on = argv[argv.index('--autostart') + 1:argv.index('--autostart') + 2] != ['off']
-        set_autostart(on)
-        print('autostart ' + ('on: ' + PLIST if on else 'off'))
-        return
     write_loader()
     build()
     if '--ensure' in argv and not watching():

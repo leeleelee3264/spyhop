@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Spyhop launcher.
-#
-#   ./spyhop                 start the board and open it
-#                            (with Orca: in a "Spyhop" workspace under the ~/.spyhop project; otherwise in the default browser)
-#   ./spyhop --stop          stop the board
-#   ./spyhop --autostart     start the board at login (LaunchAgent)
-#   ./spyhop --no-autostart  remove the login item
+# Spyhop: start the board and open it.
+# With Orca it opens in a "Spyhop" workspace under the ~/.spyhop project; otherwise in the default browser.
+# Everything else (start at login, theme, summarizer...) lives in the board's Settings.
 #
 # Your own repositories are never touched. ~/.spyhop is a tiny empty git repo created once,
 # because Orca only registers git repos from the CLI.
@@ -13,10 +9,6 @@ set -e
 d=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 home="$HOME/.spyhop"
 loader="file://$home/open.html"
-
-if [ "${1:-}" = "--autostart" ]; then python3 "$d/board.py" --autostart on; exit 0; fi
-if [ "${1:-}" = "--no-autostart" ]; then python3 "$d/board.py" --autostart off; exit 0; fi
-if [ "${1:-}" = "--stop" ]; then pkill -f "board.py --watch" && echo "stopped" || echo "not running"; exit 0; fi
 
 python3 "$d/board.py" --ensure >/dev/null
 if command -v orca >/dev/null && orca status --json >/dev/null 2>&1; then
