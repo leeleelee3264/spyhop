@@ -1084,13 +1084,13 @@ def build():
     html = TEMPLATE.replace('__LOADER__', 'file://' + LOADER).replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
         .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', foot + '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals) + render_settings()))
     os.makedirs(BASE, exist_ok=True)
-    with open(OUT + '.tmp', 'w', encoding='utf-8') as f:
+    with open(OUT + '.%d.tmp' % os.getpid(), 'w', encoding='utf-8') as f:
         f.write(html)
-    os.replace(OUT + '.tmp', OUT)
+    os.replace(OUT + '.%d.tmp' % os.getpid(), OUT)
     infos = sorted((t['_info'] for t in terms if t.get('_info')), key=lambda i: (i['ws'], i['order']))
-    with open(STATE + '.tmp', 'w', encoding='utf-8') as f:
+    with open(STATE + '.%d.tmp' % os.getpid(), 'w', encoding='utf-8') as f:
         json.dump({'at': time.time(), 'sessions': infos}, f, ensure_ascii=False)
-    os.replace(STATE + '.tmp', STATE)
+    os.replace(STATE + '.%d.tmp' % os.getpid(), STATE)
     return len(terms)
 
 
@@ -1140,13 +1140,15 @@ def serve():
                 subprocess.run(['osascript', '-e', 'tell application "Orca" to activate'], capture_output=True, timeout=5)
                 return self.send(204)
             if u.path == '/open-board':
-                subprocess.run(['open', 'http://127.0.0.1:%d/' % PORT])
+                open_board()
                 return self.send(204)
             return self.send(404, b'not found')
 
         def do_POST(self):
             if urlparse(self.path).path == '/config':
                 req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
+                if 'autostart' in req:
+                    set_autostart(bool(req['autostart']))
                 for key, allowed in (('refresh', REFRESH_OPTS), ('orcas', (True, False))):
                     if key in req:
                         if req[key] not in allowed:
@@ -1273,6 +1275,57 @@ def write_loader():
         pass
 
 
+PLIST = os.path.expanduser('~/Library/LaunchAgents/com.spyhop.board.plist')
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def autostart_on():
+    return os.path.exists(PLIST)
+
+
+def set_autostart(on):
+    """맥 로그인 때 보드를 켜는 LaunchAgent 를 등록/해제한다. 끌 때는 파일만 지워서 지금 돌고 있는 보드는 살려 둔다."""
+    if not on:
+        if os.path.exists(PLIST):
+            os.remove(PLIST)
+        return
+    path = os.pathsep.join(['/usr/local/bin', '/opt/homebrew/bin', os.path.expanduser('~/.local/bin'), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])
+    os.makedirs(os.path.dirname(PLIST), exist_ok=True)
+    os.makedirs(os.path.expanduser('~/Library/Logs'), exist_ok=True)
+    with open(PLIST, 'w', encoding='utf-8') as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+                '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>'
+                '<key>Label</key><string>com.spyhop.board</string>'
+                '<key>ProgramArguments</key><array><string>%s</string><string>%s</string><string>--watch</string></array>'
+                '<key>RunAtLoad</key><true/><key>EnvironmentVariables</key><dict><key>PATH</key><string>%s</string></dict>'
+                '<key>StandardErrorPath</key><string>%s</string></dict></plist>\n'
+                % (escape(sys.executable), escape(os.path.join(HERE, 'board.py')), path,
+                   escape(os.path.expanduser('~/Library/Logs/spyhop.log'))))
+    uid = str(os.getuid())
+    subprocess.run(['launchctl', 'bootout', 'gui/' + uid, PLIST], capture_output=True)
+    subprocess.run(['launchctl', 'bootstrap', 'gui/' + uid, PLIST], capture_output=True)  # 이미 보드가 돌고 있으면 새로 뜬 쪽은 바로 끝난다
+
+
+def open_board():
+    """메뉴바의 'Open full board': 오르카가 있으면 Spyhop 워크스페이스의 보드 탭으로, 없으면 기본 브라우저로."""
+    if find_bin('orca'):
+        launcher = next((p for p in (os.path.join(HERE, 'spyhop'), os.path.join(HERE, 'progress-all')) if os.path.exists(p)), None)
+        try:
+            if launcher:
+                subprocess.run([launcher], capture_output=True, timeout=60)   # 프로젝트·워크스페이스·탭이 없으면 만든다
+            home = os.path.expanduser('~/.spyhop')
+            wid = next(w['id'] for w in orca('worktree', 'list')['worktrees'] if w.get('path') == home)
+            tab = next(t for t in orca('tab', 'list', '--worktree', 'id:' + wid)['tabs']
+                       if '47613' in t.get('url', '') or 'spyhop/open.html' in t.get('url', ''))
+            subprocess.run(['orca', 'tab', 'switch', '--page', tab['browserPageId'], '--worktree', 'id:' + wid, '--focus', '--json'],
+                           capture_output=True, timeout=15)
+            subprocess.run(['osascript', '-e', 'tell application "Orca" to activate'], capture_output=True, timeout=5)
+            return
+        except (StopIteration, KeyError, ValueError, OSError, subprocess.SubprocessError):
+            pass
+    subprocess.run(['open', 'file://' + LOADER])
+
+
 def watch():
     # 감시는 하나만 돈다. 두 개가 돌면 서로 다른 버전의 코드가 번갈아 보드를 덮어쓴다(실제로 겪음)
     import fcntl
@@ -1321,6 +1374,11 @@ def sample_metrics():
 def main(argv):
     if '--watch' in argv:
         watch()
+        return
+    if '--autostart' in argv:
+        on = argv[argv.index('--autostart') + 1:argv.index('--autostart') + 2] != ['off']
+        set_autostart(on)
+        print('autostart ' + ('on: ' + PLIST if on else 'off'))
         return
     write_loader()
     build()
@@ -1405,6 +1463,8 @@ def render_settings():
             + sec('Theme', '', '<div class="ths">%s</div>' % cards)
             + sec('Orca animation', 'Orcas spyhop in the header',
                   '<label class="sw"><input type="checkbox"%s onchange="setCfg({orcas:this.checked})"><i></i></label>' % (' checked' if orcas_on() else ''))
+            + sec('Start at login', 'Run the board when you log in to this Mac',
+                  '<label class="sw"><input type="checkbox"%s onchange="setCfg({autostart:this.checked})"><i></i></label>' % (' checked' if autostart_on() else ''))
             + sec('Update every', 'Longer uses less CPU and fewer model calls',
                   pills('refresh', REFRESH_OPTS, refresh_sec(), lambda v: '%ds' % v))
             + sec('Resource usage', 'This board, incl. orca and model calls',

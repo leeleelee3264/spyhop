@@ -56,7 +56,7 @@ python3 board.py --ensure   # 감시만 켠다
 
 ### 켜지고 꺼지는 기준
 
-- **켜짐**: `./spyhop` 실행 · 맥 로그인(`./spyhop --autostart` 로 등록한 경우) · Claude나 Codex가 떠 있을 때(메뉴바 플러그인이 5초마다 확인)
+- **켜짐**: `./spyhop` 실행 · 맥 로그인(설정의 Start at login 또는 `./spyhop --autostart`, 기본은 꺼짐) · Claude나 Codex가 떠 있을 때(메뉴바 플러그인이 5초마다 확인)
 - **꺼짐**: 떠 있는 AI 세션이 30분 동안 하나도 없으면 스스로 끝납니다. 다시 Claude·Codex를 켜거나 `./spyhop`을 실행하면 켜집니다.
 - 감시 프로세스는 하나만 뜹니다(중복 실행은 바로 종료).
 - 오르카 탭은 `~/.spyhop/open.html` 을 엽니다. 서버가 꺼져 있으면 "Starting the board…"를 보여주고, 서버가 뜨면 보드를 띄웁니다.

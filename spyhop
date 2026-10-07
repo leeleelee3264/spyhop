@@ -10,32 +10,9 @@ set -e
 d=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 home="$HOME/.spyhop"
 loader="file://$home/open.html"
-plist="$HOME/Library/LaunchAgents/com.spyhop.board.plist"
 
-if [ "${1:-}" = "--autostart" ]; then
-  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
-  cat > "$plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.spyhop.board</string>
-  <key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>$d/board.py</string><string>--watch</string></array>
-  <key>RunAtLoad</key><true/>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
-  <key>StandardErrorPath</key><string>$HOME/Library/Logs/spyhop.log</string>
-</dict></plist>
-EOF
-  launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$plist"
-  echo "autostart on: $plist"
-  exit 0
-fi
-if [ "${1:-}" = "--no-autostart" ]; then
-  launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
-  rm -f "$plist"
-  echo "autostart off"
-  exit 0
-fi
+if [ "${1:-}" = "--autostart" ]; then python3 "$d/board.py" --autostart on; exit 0; fi
+if [ "${1:-}" = "--no-autostart" ]; then python3 "$d/board.py" --autostart off; exit 0; fi
 
 python3 "$d/board.py" --ensure >/dev/null
 if command -v orca >/dev/null && orca status --json >/dev/null 2>&1; then
