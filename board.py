@@ -1081,7 +1081,7 @@ def build():
     head = ('<div class="brand"><b>Spyhop</b><em class="tag">all your AI sessions at a glance</em></div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' % tiles
             + GEAR + '</a></div>' + (SEA if orcas_on() else ''))
     foot = '<div class="subbar">%s<small>updated %s</small></div>' % (legend, time.strftime('%H:%M:%S'))
-    html = TEMPLATE.replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
+    html = TEMPLATE.replace('__LOADER__', 'file://' + LOADER).replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
         .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', foot + '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals) + render_settings()))
     os.makedirs(BASE, exist_ok=True)
     with open(OUT + '.tmp', 'w', encoding='utf-8') as f:
@@ -1245,10 +1245,40 @@ def watching():
         return False
 
 
+LOADER = os.path.expanduser('~/.spyhop/open.html')
+LOADER_HTML = """<!doctype html><html><head><meta charset="utf-8"><title>Spyhop</title><link rel="icon" href="__FAV__">
+<style>html,body{margin:0;height:100%;font:13px -apple-system,sans-serif;background:#f4f5f8;color:#44546f}
+@media (prefers-color-scheme:dark){html,body{background:#161a1d;color:#9fadbc}}
+iframe{display:none;border:0;width:100%;height:100%}#w{height:100%;display:flex;align-items:center;justify-content:center;text-align:center}
+b{display:block;font-size:16px;margin-bottom:6px}</style></head>
+<body><iframe id="f"></iframe><div id="w"><div><b>Spyhop</b><span id="m">Starting the board…</span></div></div><script>
+// 오르카 탭은 늘 이 파일을 연다. 보드 서버가 살아 있으면 안에 보드를 띄우고, 꺼지면 안내를 보이며 다시 붙을 때까지 기다린다
+var f=document.getElementById('f'),w=document.getElementById('w'),up=false,miss=0;
+(function chk(){fetch('http://127.0.0.1:47613/state.json',{mode:'no-cors',cache:'no-store'})
+.then(function(){miss=0;if(!up){up=true;f.src='http://127.0.0.1:47613/';f.style.display='block';w.style.display='none'}})
+.catch(function(){if(up){up=false;f.style.display='none';w.style.display='flex'}
+  if(++miss>15)document.getElementById('m').textContent='Waiting for the board server · it starts at login or when Claude or Codex runs'})
+.then(function(){setTimeout(chk,up?10000:2000)})})()
+</script></body></html>""".replace('__FAV__', 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%231e293b%22/%3E%3Cmask%20id%3D%22mm%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20fill%3D%22%23fff%22/%3E%3Cg%20fill%3D%22%23000%22%3E%3Cellipse%20cx%3D%2218.4%22%20cy%3D%2212.2%22%20rx%3D%221.25%22%20ry%3D%223.1%22%20transform%3D%22rotate%28-12%2018.4%2012.2%29%22/%3E%3Cpath%20d%3D%22M12.4%209.6%20C11.1%2013.4%2010.4%2019%2010.6%2026%20L14.6%2026%20C14%2020.2%2013.7%2014.8%2013.9%207.6%20C13.3%208.2%2012.8%208.9%2012.4%209.6%20Z%22/%3E%3C/g%3E%3Cpath%20d%3D%22M0%2025.5%20Q4%2023.6%208%2025.5%20T16%2025.5%20T24%2025.5%20T32%2025.5%20V32%20H0%20Z%22%20fill%3D%22%23000%22/%3E%3C/mask%3E%3Cg%20mask%3D%22url%28%23mm%29%22%20fill%3D%22%23ffffff%22%3E%3Cpath%20d%3D%22M9.6%2031%20C9%2023%209.8%2015.6%2012%2010.2%20C13.4%206.8%2015.2%204.6%2016.9%204.4%20C18.7%204.3%2020%206.2%2020.8%209.2%20C22%2013.6%2022.5%2020%2022.6%2031%20Z%22/%3E%3C/g%3E%3Cpath%20d%3D%22M2%2027.2%20Q6%2025.3%2010%2027.2%20T18%2027.2%20T26%2027.2%20T34%2027.2%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22/%3E%3C/svg%3E')
+
+
+def write_loader():
+    """서버가 꺼져 있어도 열리는 안내 페이지. 오르카 탭은 이 파일을 열고, 서버가 뜨면 보드로 넘어간다."""
+    try:
+        os.makedirs(os.path.dirname(LOADER), exist_ok=True)
+        if not os.path.exists(LOADER) or open(LOADER, encoding='utf-8').read() != LOADER_HTML:
+            with open(LOADER, 'w', encoding='utf-8') as f:
+                f.write(LOADER_HTML)
+    except OSError:
+        pass
+
+
 def watch():
     # 감시는 하나만 돈다. 두 개가 돌면 서로 다른 버전의 코드가 번갈아 보드를 덮어쓴다(실제로 겪음)
     import fcntl
     global _LOCK
+    os.makedirs(BASE, exist_ok=True)   # 맥을 막 켜면 /tmp 가 비어 있다
+    write_loader()
     _LOCK = open(os.path.join(BASE, 'watch.lock'), 'w')
     try:
         fcntl.flock(_LOCK, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1292,6 +1322,7 @@ def main(argv):
     if '--watch' in argv:
         watch()
         return
+    write_loader()
     build()
     if '--ensure' in argv and not watching():
         subprocess.Popen([sys.executable, os.path.abspath(__file__), '--watch'],
@@ -1629,7 +1660,7 @@ function fit(){var lv=['lv-nosum','lv-noreply','lv-bar','lv-min'];document.query
   var hid=cards.filter(function(a){return a.getBoundingClientRect().bottom>innerHeight}).length;
   if(hid){m.textContent='↓ '+hid+' more below';m.style.display='block'}})}
 fit();var ft;addEventListener('resize',function(){clearTimeout(ft);ft=setTimeout(fit,120)});
-setInterval(function(){if((!location.hash||location.hash==='#'))location.reload()},__REFRESH_MS__)</script>
+setInterval(function(){if(location.hash&&location.hash!=='#')return;fetch('http://127.0.0.1:47613/state.json',{cache:'no-store'}).then(function(){location.reload()}).catch(function(){if(window.top===window)location.href='__LOADER__'})},__REFRESH_MS__)</script>
 </body></html>'''
 
 if __name__ == '__main__':

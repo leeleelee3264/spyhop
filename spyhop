@@ -1,17 +1,48 @@
 #!/usr/bin/env bash
 # Spyhop 실행: 감시를 켜고, 오르카가 있으면 전용 프로젝트(~/.spyhop)의 "Spyhop" 워크스페이스 브라우저 탭으로 보드를 연다.
 # 사용자의 코드 저장소는 건드리지 않는다. ~/.spyhop 은 빈 git 저장소(오르카가 프로젝트로 받으려면 git 이어야 함)로 한 번만 만든다.
-# 이미 보드 탭이 있으면 그대로 둔다. 오르카가 없으면 기본 브라우저로 연다.
+# 탭은 ~/.spyhop/open.html 을 연다. 서버가 꺼져 있으면 기다렸다가 보드를 띄운다. 오르카가 없으면 기본 브라우저로 연다.
+#
+#   ./spyhop                 켜고 연다
+#   ./spyhop --autostart     맥 로그인 때 자동으로 켜지게 등록 (LaunchAgent)
+#   ./spyhop --no-autostart  자동 시작 해제
 set -e
 d=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
-url=http://127.0.0.1:47613/
 home="$HOME/.spyhop"
+loader="file://$home/open.html"
+plist="$HOME/Library/LaunchAgents/com.spyhop.board.plist"
+
+if [ "${1:-}" = "--autostart" ]; then
+  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+  cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.spyhop.board</string>
+  <key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>$d/board.py</string><string>--watch</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/spyhop.log</string>
+</dict></plist>
+EOF
+  launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$plist"
+  echo "autostart on: $plist"
+  exit 0
+fi
+if [ "${1:-}" = "--no-autostart" ]; then
+  launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
+  rm -f "$plist"
+  echo "autostart off"
+  exit 0
+fi
+
 python3 "$d/board.py" --ensure >/dev/null
 if command -v orca >/dev/null && orca status --json >/dev/null 2>&1; then
   mkdir -p "$home"
   if [ ! -d "$home/.git" ]; then
     git -C "$home" init -q -b main
-    printf 'config.json\n' > "$home/.gitignore"
+    printf 'config.json\nopen.html\n' > "$home/.gitignore"
     git -C "$home" add .gitignore
     git -C "$home" -c user.name=spyhop -c user.email=spyhop@localhost commit -q -m "spyhop board home"
   fi
@@ -27,10 +58,10 @@ ws=json.load(sys.stdin)['result']['worktrees']
 print(next((w['id'] for w in ws if w.get('path')==os.path.expanduser('~/.spyhop')),''))")"
     orca worktree set --worktree "id:$wid" --display-name Spyhop --json >/dev/null
   fi
-  if ! orca tab list --worktree "id:$wid" --json 2>/dev/null | grep -q '127.0.0.1:47613'; then
-    orca tab create --worktree "id:$wid" --url "$url" --json >/dev/null
+  if ! orca tab list --worktree "id:$wid" --json 2>/dev/null | grep -qE '127.0.0.1:47613|spyhop/open.html'; then
+    orca tab create --worktree "id:$wid" --url "$loader" --json >/dev/null
   fi
-  echo "opened: orca workspace Spyhop ($url)"
+  echo "opened: orca workspace Spyhop"
   exit 0
 fi
-open "$url" && echo "opened: browser $url"
+open "$loader" && echo "opened: browser $loader"
