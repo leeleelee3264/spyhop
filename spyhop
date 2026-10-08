@@ -11,6 +11,20 @@ home="$HOME/.spyhop"
 loader="file://$home/open.html"
 
 python3 "$d/board.py" --ensure >/dev/null
+
+# 메뉴바: SwiftBar 가 깔려 있으면 플러그인을 알아서 붙인다 (brew 업그레이드에도 안 깨지게 opt 경로로)
+if [ -d /Applications/SwiftBar.app ]; then
+  plugins="$(defaults read com.ameba.SwiftBar PluginDirectory 2>/dev/null || true)"
+  if [ -z "$plugins" ]; then
+    plugins="$HOME/.config/spyhop/swiftbar"
+    defaults write com.ameba.SwiftBar PluginDirectory "$plugins"
+  fi
+  if [ ! -e "$plugins/spyhop.5s.py" ]; then
+    mkdir -p "$plugins"
+    ln -s "$(echo "$d" | sed -E 's#/Cellar/spyhop/[^/]+#/opt/spyhop#')/menubar/spyhop.5s.py" "$plugins/spyhop.5s.py"
+    echo "menu bar: added to SwiftBar"
+  fi
+fi
 if command -v orca >/dev/null && orca status --json >/dev/null 2>&1; then
   mkdir -p "$home"
   if [ ! -d "$home/.git" ]; then
