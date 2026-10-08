@@ -69,6 +69,7 @@ Each Orca workspace is a column and each session is a card.
 - **My turn / Working** counts sit in the header, and sessions waiting for you are at the top of each column.
 - A **No progress** badge appears when a working session hasn't written anything for 5 minutes — a long test run, or a stuck tool.
 - When the window is short, the cards in a column shrink together into progress bars.
+- Helper panes that a session starts through Orca orchestration (a cross-check, a second review) don't get their own card. They show up as one line under the session that started them, e.g. `↳ Codex · Done`, and the detail view shows their one-line result.
 
 ### Detail view
 

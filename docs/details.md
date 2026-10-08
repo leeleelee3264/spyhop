@@ -14,6 +14,7 @@ Reference for things the README doesn't need to say.
 | Is it running? | `curl -s http://127.0.0.1:47613/state.json` returns JSON |
 | Logs | `/tmp/progress-board/watch.log` · `~/Library/Logs/spyhop.log` when started at login |
 | Settings / groups | `~/.spyhop/config.json` · `~/.spyhop/groups.json` |
+| Request key | `/tmp/progress-board/token` (changing requests must carry it; only the board page has it) |
 | Cached summaries | `/tmp/progress-board/auto/<transcript>.json` (delete one to re-summarize that session from scratch) |
 | Port | `127.0.0.1:47613` (local only) |
 
@@ -34,8 +35,12 @@ Typical cost on a Mac with ~6 sessions: about 70–80 MB of memory and around 1%
 2. It matches each pane to its transcript (`~/.claude/projects/…` for Claude, `~/.codex/sessions/…` for Codex).
 3. For sessions whose transcript changed, it asks the summarizer for a title, summary, steps and TODOs as JSON.
    - The first call reads the whole conversation. After that it only sends the previous summary plus the new part of the conversation, so titles and finished steps stay put.
+   - When the new part contains a new request from you, the session is summarized from scratch instead, so the current step can't get stuck.
    - Each session is re-summarized at most once per 1–5 minutes, depending on the update interval.
-4. It renders the board and serves it on `127.0.0.1`.
+4. Helper panes started through Orca orchestration are attached to the session that started them (via `parentPaneKey`, or the orchestration run's coordinator).
+5. It renders the board and serves it on `127.0.0.1`.
+
+A Codex session counts as working until its last turn completes in the transcript; Claude sessions use Orca's agent state.
 
 Claude models offered in Settings are the current ones plus any found in your recent transcripts. Codex models come from `~/.codex/models_cache.json`.
 
@@ -43,7 +48,8 @@ Claude models offered in Settings are the current ones plus any found in your re
 
 - Transcripts are sent to the summarizer you pick. Before sending, Spyhop masks strings that look like AWS keys, API tokens, JWTs and `password=` values. This is a best-effort filter, not a guarantee.
 - Summaries and state are kept in `/tmp/progress-board/`. Settings and topic groups live in `~/.spyhop/`.
-- The server listens on `127.0.0.1` only and only acts on sessions currently shown on the board.
+- The server listens on `127.0.0.1` only and only acts on sessions currently shown on the board. Requests that change anything must carry a random key that only the board page contains, so other web pages can't call it.
+- Board files are readable only by you (`/tmp/progress-board` is 0700).
 - `~/.spyhop` is an empty git repo only because Orca registers projects from git repos. Spyhop never touches your own repositories.
 
 ## Files
