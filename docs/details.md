@@ -38,7 +38,9 @@ Typical cost on a Mac with ~6 sessions: about 70–80 MB of memory and around 1%
    - When the new part contains a new request from you, the session is summarized from scratch instead, so the current step can't get stuck.
    - Each session is re-summarized at most once per 1–5 minutes, depending on the update interval.
 4. Helper panes started through Orca orchestration are attached to the session that started them (via `parentPaneKey`, or the orchestration run's coordinator).
-5. It renders the board and serves it on `127.0.0.1`.
+5. It renders the board right away with the summaries it already has and serves it on `127.0.0.1`. Summaries are refreshed in the background, and the board is redrawn as soon as they land. Reloading the page redraws it on the spot.
+
+Panes whose transcript can't be found are left off the board.
 
 A Codex session counts as working until its last turn completes in the transcript; Claude sessions use Orca's agent state.
 

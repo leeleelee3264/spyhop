@@ -280,6 +280,36 @@ def text_of(content):
     return ''
 
 
+_FILE_CACHE = {}
+
+
+def per_file(fn):
+    """같은 파일이 같은 크기면 다시 읽지 않는다 (대화 기록은 뒤에 붙기만 한다). 파일마다 마지막 값 하나만 둔다."""
+    def wrap(path):
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            return fn(path)
+        hit = _FILE_CACHE.get((fn.__name__, path))
+        if not hit or hit[0] != size:
+            hit = _FILE_CACHE[(fn.__name__, path)] = (size, fn(path))
+        return hit[1]
+    return wrap
+
+
+@per_file
+def ai_title(f):
+    title = None
+    with open(f, encoding='utf-8', errors='ignore') as fh:
+        for line in fh:
+            if '"ai-title"' in line:
+                try:
+                    title = json.loads(line).get('aiTitle') or title
+                except ValueError:
+                    pass
+    return title
+
+
 def claude_index(worktree_path):
     """워크스페이스 경로의 Claude 기록을 제목(ai-title) → 파일로 묶는다. 최근 3일 것만."""
     proj = os.path.expanduser('~/.claude/projects/' + re.sub(r'[^A-Za-z0-9]', '-', worktree_path))
@@ -287,14 +317,7 @@ def claude_index(worktree_path):
     for f in sorted(glob.glob(proj + '/*.jsonl'), key=os.path.getmtime):
         if time.time() - os.path.getmtime(f) > 3 * 86400:
             continue
-        title = None
-        with open(f, encoding='utf-8', errors='ignore') as fh:
-            for line in fh:
-                if '"ai-title"' in line:
-                    try:
-                        title = json.loads(line).get('aiTitle') or title
-                    except ValueError:
-                        pass
+        title = ai_title(f)
         if title:
             idx[title] = f
     return idx
@@ -493,6 +516,7 @@ def norm(x):
     return re.sub(r'\s+', '', x or '')
 
 
+@per_file
 def codex_user_msgs(path):
     msgs = []
     with open(path, encoding='utf-8', errors='ignore') as fh:
@@ -1123,6 +1147,32 @@ def render(t, steps, ws):
 
 
 BUILD_LOCK = threading.Lock()
+WAKE = threading.Event()      # 요약이 끝나면 감시 루프를 바로 깨워 다시 그린다
+_SUMMARY = {'busy': False}
+
+
+def cached_summary(path):
+    try:
+        with open(os.path.join(AUTO, os.path.basename(path) + '.json'), encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def summarize_later(logs):
+    """요약(모델 호출)은 뒤에서 돌린다. 보드는 기다리지 않고 지금 가진 요약으로 그리고, 요약이 끝나면 다시 그린다."""
+    if _SUMMARY['busy']:
+        return
+    _SUMMARY['busy'] = True
+
+    def work():
+        try:
+            with ThreadPoolExecutor(6) as ex:
+                list(ex.map(summarize, logs))
+        finally:
+            _SUMMARY['busy'] = False
+            WAKE.set()
+    threading.Thread(target=work, daemon=True).start()
 
 
 def build():
@@ -1132,14 +1182,17 @@ def build():
 
 
 def _build():
-    worktrees = {w['id']: w for w in orca('worktree', 'list')['worktrees']}
-    LIST_CACHE['list'] = orca('terminal', 'list')
+    # 오르카 조회 셋은 서로 기다릴 필요가 없어 한꺼번에 묻는다 (갱신 시간의 대부분이 이 대기다)
+    with ThreadPoolExecutor(3) as ex:
+        f_wt, f_term, f_agents = ex.submit(orca, 'worktree', 'list'), ex.submit(orca, 'terminal', 'list'), ex.submit(orca_agents)
+        worktrees = {w['id']: w for w in f_wt.result()['worktrees']}
+        LIST_CACHE['list'] = f_term.result()
+        agents = f_agents.result()
     LIST_CACHE['stamp'] = {t['handle']: t.get('lastOutputAt') for t in LIST_CACHE['list']['terminals']}
     spy = {w for w, v in worktrees.items() if v.get('path') == os.path.expanduser('~/.spyhop')}
     terms = [t for t in LIST_CACHE['list']['terminals']
              if not t.get('orphaned') and not is_shell(t.get('title', ''))
              and t.get('worktreeId') not in spy and (t.get('ptyId') or '').split('@@')[0] not in spy]
-    agents = orca_agents()
     for t in terms:
         t['paneKey'] = '%s:%s' % (t['tabId'], t['leafId'])
         t['agent'] = agents.get(t['paneKey'])
@@ -1150,6 +1203,8 @@ def _build():
     # 화면 배치(visualLayouts)에도 없고 오르카 에이전트 목록에도 없는 창은 UI 에서 보이지 않는 창이다 → 뺀다
     shown = layout_handles()
     terms = [t for t in terms if t['handle'] in shown or t.get('agent')]
+    with ThreadPoolExecutor(6) as ex:  # 화면이 바뀐 창만 실제로 읽는다. 여러 창을 한꺼번에
+        list(ex.map(lambda t: read_tail(t['handle']), terms))
     # 다른 세션이 오케스트레이션으로 띄운 작업 창(검수·교차 확인)은 따로 카드로 만들지 않고 부른 세션 카드에 붙인다
     keys = {t['paneKey']: t for t in terms}
     links = orch_links()['parent']
@@ -1159,12 +1214,14 @@ def _build():
             keys[p].setdefault('subs', []).append(t)
             terms.remove(t)
     match_sessions(terms, worktrees)
+    alive = len(terms)
+    # 대화 기록을 못 찾은 창은 보여줄 게 없다(빈 "Codex ready" 카드). 기록이 붙으면 그때 나온다
+    terms = [t for t in terms if t.get('log')]
 
-    logs = sorted({t['log'] for t in terms if t.get('log')})
-    steps = {}
+    logs = sorted({t['log'] for t in terms})
+    steps = {l: cached_summary(l) for l in logs}
     if logs:
-        with ThreadPoolExecutor(6) as ex:
-            steps = dict(zip(logs, ex.map(summarize, logs)))
+        summarize_later(logs)
 
     mode = group_mode()
     grouping = ''
@@ -1219,7 +1276,7 @@ def _build():
     os.replace(OUT + '.%d.tmp' % os.getpid(), OUT)
     infos = sorted((t['_info'] for t in terms if t.get('_info')), key=lambda i: (i['ws'], i['order']))
     save_json(STATE, {'at': time.time(), 'sessions': infos})
-    return len(terms)
+    return alive
 
 
 # ---------- 묶기: 오르카 워크스페이스 / AI 주제 ----------
@@ -1319,6 +1376,11 @@ def serve():
             u = urlparse(self.path)
             q = parse_qs(u.query)
             if u.path in ('/', '/board'):
+                if 'spyhop_auto=1' not in (self.headers.get('Cookie') or ''):
+                    try:
+                        build()
+                    except Exception as e:
+                        sys.stderr.write('board: %s\n' % e)
                 return self.send(200, open(OUT, 'rb').read(), 'text/html; charset=utf-8')
             if u.path == '/panel':
                 page = open(PANEL, encoding='utf-8').read().replace('</style>', THEME_CSS + '</style>', 1).replace('__TOKEN__', token()) \
@@ -1552,7 +1614,8 @@ def watch():
         except Exception as e:
             sys.stderr.write('board: %s\n' % e)
         sample_metrics()
-        time.sleep(refresh_sec())
+        WAKE.wait(refresh_sec())
+        WAKE.clear()
 
 
 METRICS = []          # 최근 60개 [시각, CPU %(맥 전체 대비), 메모리 MB]
@@ -1937,7 +2000,7 @@ function fit(){var lv=['lv-nosum','lv-noreply','lv-bar','lv-min'];document.query
   var hid=cards.filter(function(a){return a.getBoundingClientRect().bottom>innerHeight}).length;
   if(hid){m.textContent='↓ '+hid+' more below';m.style.display='block'}})}
 fit();var ft;addEventListener('resize',function(){clearTimeout(ft);ft=setTimeout(fit,120)});
-setInterval(function(){if(location.hash&&location.hash!=='#')return;fetch('http://127.0.0.1:47613/state.json',{cache:'no-store'}).then(function(){location.reload()}).catch(function(){if(window.top===window)location.href='__LOADER__'})},__REFRESH_MS__)</script>
+setInterval(function(){if(location.hash&&location.hash!=='#')return;fetch('http://127.0.0.1:47613/state.json',{cache:'no-store'}).then(function(){document.cookie='spyhop_auto=1;max-age=3;path=/';location.reload()}).catch(function(){if(window.top===window)location.href='__LOADER__'})},__REFRESH_MS__)</script>
 </body></html>'''
 
 if __name__ == '__main__':
