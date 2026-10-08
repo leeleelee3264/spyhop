@@ -1154,6 +1154,7 @@ def render(t, steps, ws):
     for f in flow:  # 단계 색은 끝냄·지금·예정 셋만 쓴다 (내 차례 여부는 카드 상태가 이미 보여준다)
         if f['state'] == 'now' and st == 'wait':
             f['state'] = 'done'  # AI 가 턴을 끝내고 내 차례면 지금 하는 일은 없다 (요약 모델이 끝난 일을 now 로 남겨도 바로잡는다)
+            t['_fixed_now'] = f['label']
         elif f['state'] == 'blocked':
             f['state'] = 'now'
     model = model_of(t.get('log')) if t.get('log') else model_from_screen(read_tail(t['handle']))
@@ -1273,6 +1274,18 @@ def summarize_later(logs):
     threading.Thread(target=work, daemon=True).start()
 
 
+_CHECK = {'last': None}
+
+
+def check_board(terms):
+    """끝났는데 안 끝난 걸로 보이는 카드가 생기면 기록한다(같은 내용은 한 번만). 이미 그린 카드만 훑는다."""
+    fixed = sorted('%s → %s' % ((t.get('_info') or {}).get('title', '')[:30], t['_fixed_now']) for t in terms if t.get('_fixed_now'))
+    if fixed and fixed != _CHECK['last']:
+        sys.stderr.write('%s check: 내 차례인데 요약에 now 로 남은 단계 %d개를 done 으로 표시: %s\n'
+                         % (time.strftime('%H:%M:%S'), len(fixed), ' | '.join(fixed)))
+    _CHECK['last'] = fixed
+
+
 def build():
     """보드 한 장을 그린다. 감시 루프와 설정 저장이 동시에 부를 수 있어 한 번에 하나만 돌게 한다."""
     with BUILD_LOCK:
@@ -1377,6 +1390,7 @@ def _build():
         f.write(html)
     os.replace(OUT + '.%d.tmp' % os.getpid(), OUT)
     infos = sorted((t['_info'] for t in terms if t.get('_info')), key=lambda i: (i['ws'], i['order']))
+    check_board(terms)
     save_json(STATE, {'at': time.time(), 'sessions': infos})
     return alive
 
