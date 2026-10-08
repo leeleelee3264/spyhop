@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
@@ -74,11 +75,17 @@ def load_config():
         return {}
 
 
+def save_json(path, obj):
+    """임시 파일에 다 쓴 뒤 바꿔 끼운다. 쓰다 멈추거나 둘이 동시에 써도 반쯤 쓴 파일이 남지 않는다."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = '%s.%d.%d.tmp' % (path, os.getpid(), threading.get_ident())
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(obj, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
 def save_config(**kw):
-    cfg = dict(load_config(), **kw)
-    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
-    with open(CONFIG, 'w', encoding='utf-8') as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=1)
+    save_json(CONFIG, dict(load_config(), **kw))
 
 
 _SUMS = {}
@@ -354,9 +361,12 @@ def summarize(path):
     cache = os.path.join(AUTO, key + '.json')
     size = os.path.getsize(path)
     old = None
-    if os.path.exists(cache):
+    try:
         with open(cache, encoding='utf-8') as f:
             old = json.load(f)
+    except (OSError, ValueError):
+        old = None
+    if old:
         fresh = time.time() - old.get('at', 0) < resum_sec()
         if old.get('size') == size or fresh:
             return old
@@ -406,9 +416,7 @@ def summarize(path):
         sys.stderr.write('summarize %s: %s\n' % (key, str(e)[:200]))
         # 실패해도 1분은 다시 부르지 않는다 (5초마다 무거운 호출을 반복하지 않게)
         res = dict(old or {}, size=-1, at=time.time(), fail=True, err=str(e)[:120])  # 내용은 마지막 성공본 유지, ok_at 도 그대로
-    os.makedirs(AUTO, exist_ok=True)
-    with open(cache, 'w', encoding='utf-8') as f:
-        json.dump(res, f, ensure_ascii=False)
+    save_json(cache, res)
     return res
 
 
@@ -516,9 +524,7 @@ def load_matches():
 def save_matches(new):
     cur = load_matches()
     cur.update(new)
-    os.makedirs(BASE, exist_ok=True)
-    with open(MATCHES, 'w') as f:
-        json.dump(cur, f)
+    save_json(MATCHES, cur)
 
 
 def match_sessions(terms, worktrees):
@@ -911,8 +917,7 @@ def save_override(log, label, done):
         d[key].pop(label, None)
     else:
         d[key][label] = 'done' if done else 'open'
-    with open(OVERRIDES, 'w', encoding='utf-8') as f:
-        json.dump(d, f, ensure_ascii=False, indent=1)
+    save_json(OVERRIDES, d)
 
 
 def render_todo(items, log=''):
@@ -1079,7 +1084,6 @@ def render(t, steps, ws):
     return order, card, modal
 
 
-import threading
 BUILD_LOCK = threading.Lock()
 
 
@@ -1176,9 +1180,7 @@ def _build():
         f.write(html)
     os.replace(OUT + '.%d.tmp' % os.getpid(), OUT)
     infos = sorted((t['_info'] for t in terms if t.get('_info')), key=lambda i: (i['ws'], i['order']))
-    with open(STATE + '.%d.tmp' % os.getpid(), 'w', encoding='utf-8') as f:
-        json.dump({'at': time.time(), 'sessions': infos}, f, ensure_ascii=False)
-    os.replace(STATE + '.%d.tmp' % os.getpid(), STATE)
+    save_json(STATE, {'at': time.time(), 'sessions': infos})
     return len(terms)
 
 
@@ -1213,10 +1215,7 @@ def load_groups():
 
 
 def save_groups(g):
-    os.makedirs(os.path.dirname(GROUPS_FILE), exist_ok=True)
-    with open(GROUPS_FILE + '.tmp', 'w', encoding='utf-8') as f:
-        json.dump(g, f, ensure_ascii=False, indent=1)
-    os.replace(GROUPS_FILE + '.tmp', GROUPS_FILE)
+    save_json(GROUPS_FILE, g)
 
 
 def assign_groups(items):
@@ -1249,7 +1248,6 @@ def assign_groups(items):
             sys.stderr.write('grouping: %s\n' % str(e)[:200])
         finally:
             _GROUPING['busy'] = False
-    import threading
     threading.Thread(target=work, daemon=True).start()
 
 
@@ -1259,6 +1257,7 @@ def group_of(key):
 
 
 PORT = 47613
+ORIGIN = 'http://127.0.0.1:%d' % PORT
 SEA = '<div class="sea" aria-hidden="true"></div><script>(function(){var sea=document.querySelector(".sea");if(!sea)return;function fitSea(){var h=sea.parentNode.getBoundingClientRect(),a=document.querySelector(".brand").getBoundingClientRect().right-h.left+16,b=h.right-document.querySelector(".tiles").getBoundingClientRect().left+16;sea.style.left=a+"px";sea.style.right=b+"px"}fitSea();addEventListener("resize",fitSea);function pop(){var o=document.createElement("div");o.className="orca";o.innerHTML=\'<svg viewBox="0 0 32 32" width="100%" height="100%"><path d="M9.6 31 C9 23 9.8 15.6 12 10.2 C13.4 6.8 15.2 4.6 16.9 4.4 C18.7 4.3 20 6.2 20.8 9.2 C22 13.6 22.5 20 22.6 31 Z" fill="#334155"/><ellipse cx="23.6" cy="24.2" rx="2.8" ry="1.1" transform="rotate(-28 23.6 24.2)" fill="#334155"/><g fill="#ffffff"><ellipse cx="18.4" cy="12.2" rx="1.25" ry="3.1" transform="rotate(-12 18.4 12.2)"/><path d="M12.4 9.6 C11.1 13.4 10.4 19 10.6 26 L14.6 26 C14 20.2 13.7 14.8 13.9 7.6 C13.3 8.2 12.8 8.9 12.4 9.6 Z"/></g></svg>\';var w=sea.getBoundingClientRect().width-36;if(w<=0)return;o.style.left=(Math.random()*w)+"px";var k=.75+Math.random()*.5;o.style.width=o.style.height=(36*k)+"px";sea.appendChild(o);setTimeout(function(){o.remove()},3600)}setTimeout(pop,300+Math.random()*1500);(function loop(){setTimeout(function(){pop();loop()},2500+Math.random()*3000)})()})()</script>'  # 헤더 아래에서 가끔 범고래가 고개를 내민다
 PANEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'panel.html')
 
@@ -1309,6 +1308,8 @@ def serve():
             return self.send(404, b'not found')
 
         def do_POST(self):
+            if self.headers.get('Origin', ORIGIN) != ORIGIN:
+                return self.send(403, b'forbidden')
             if urlparse(self.path).path == '/config':
                 req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
                 if 'autostart' in req:
@@ -1412,7 +1413,6 @@ def serve():
     except OSError as e:
         sys.stderr.write('server: %s\n' % e)
         return
-    import threading
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
 
@@ -1493,7 +1493,9 @@ def watch():
     # 감시는 하나만 돈다. 두 개가 돌면 서로 다른 버전의 코드가 번갈아 보드를 덮어쓴다(실제로 겪음)
     import fcntl
     global _LOCK
+    os.umask(0o077)                    # 세션 요약·대화 일부가 담기므로 이 맥의 다른 사용자는 못 읽게
     os.makedirs(BASE, exist_ok=True)   # 맥을 막 켜면 /tmp 가 비어 있다
+    os.chmod(BASE, 0o700)
     write_loader()
     _LOCK = open(os.path.join(BASE, 'watch.lock'), 'w')
     try:
@@ -1539,8 +1541,7 @@ def main(argv):
         watch()
         return
     write_loader()
-    build()
-    if '--ensure' in argv and not watching():
+    if not watching():
         subprocess.Popen([sys.executable, os.path.abspath(__file__), '--watch'],
                          stdout=subprocess.DEVNULL, stderr=open(os.path.join(BASE, 'watch.log'), 'a'),
                          start_new_session=True)
