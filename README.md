@@ -5,8 +5,8 @@
 <h1 align="center">Spyhop</h1>
 
 <p align="center">
-  <b>Every AI coding session you have running, on one board.</b><br>
-  <sub>What each Claude Code and Codex session is doing, how far it has come, and whether it is waiting for you.</sub>
+  <b>Every AI coding session on one board, each with its own progress.</b><br>
+  <sub>See all your Claude Code and Codex sessions at once, and how far each one has come: done, now, next.</sub>
 </p>
 
 <p align="center">
@@ -19,8 +19,10 @@
 
 ![Board](docs/screenshots/board.png)
 
-Running several Claude Code and Codex sessions at once, it's easy to lose track of which one finished, which one is waiting for you, and which one is stuck.
-Spyhop reads each session's transcript and turns it into a card: its steps, its TODOs and whose turn it is.
+Spyhop does two things:
+
+- **All sessions in one place.** Every Claude Code and Codex session you have open becomes a card on one board, with the ones waiting for you on top. No more flipping through panes to find out which one finished or got stuck.
+- **Progress for each session.** Spyhop reads the transcript and lays the work out as steps — what's done, what it's on now, what's next — like a progress page for every session. As the work moves, finished steps stay put and the current step moves forward, so you can tell how far it has come at a glance.
 
 ## Install
 
@@ -40,7 +42,7 @@ Transcripts go to the model you pick (keys and passwords are masked first), so p
 
 ## What you get
 
-- **Cards** with steps (`Done` · `Now` · `Next` · purple `Intercept` for a side task), sorted so sessions waiting for you come first.
+- **Step flow** on every card: `Done` · `Now` · `Next`, plus purple `Intercept` for a quick side task. When space runs out, cards shrink to progress bars (`3/4 · Review`).
 - **No progress** badge when a working session hasn't written anything for 5 minutes.
 - **Helpers**: panes a session starts through Orca orchestration (a cross-check, a review) appear as one line under that session, not as their own card.
 - **Detail view**: every step explained, the last reply, a TODO checklist, the session ID, and buttons to jump to or end the session.
