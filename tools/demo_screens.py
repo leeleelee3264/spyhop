@@ -88,7 +88,7 @@ def setup():
                       'ptyId': wid + '@@x', 'lastOutputAt': t_ago * 1000, 'log': log, '_model': model, '_mins': mins})
         agents['tab%d:leaf%d' % (i, i)] = {'state': 'working' if st == 'busy' else 'done', 'stateStartedAt': t_ago * 1000}
         steps[log] = {'size': os.path.getsize(log), 'pos': 1, 'at': NOW, 'ok_at': NOW, 'title': title, 'summary': summary,
-                      'last_reply': reply, 'needs_reply': st == 'wait',
+                      'last_reply': reply,
                       'steps': [{'label': a, 'state': b, 'detail': c} for a, b, c in flow],
                       'items': [{'label': a, 'state': b, 'detail': ''} for a, b in todo]}
     return terms, agents, steps
@@ -109,7 +109,6 @@ def patch(mode):
     B.layout_handles = lambda: {t['handle'] for t in terms}
     B.match_sessions = lambda ts, ws: [t.update(log=by_log_title[t['title']]) for t in ts]
     by_log_title = {t['title']: t['log'] for t in terms}
-    B.load_snapshots = lambda: {}
     B.summarize = lambda log: steps[log]
     B.read_tail = lambda h: []
     B.model_of = lambda log: by_log[log]['_model'] if log in by_log else ''

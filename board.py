@@ -2,7 +2,6 @@
 """Spyhop - 오르카에 떠 있는 모든 AI 세션(Claude·Codex)의 작업 단계를 한 장에 모은다.
 
 각 세션의 대화 기록(Claude·Codex)을 읽어 단계 흐름과 구체적인 제목을 만든다.
-(선택) progress 스킬로 /progress 를 직접 돌린 세션은 그 결과를 우선한다.
 
   board.py           한 번 그리고 끝낸다
   board.py --ensure  감시 프로세스가 없으면 띄우고, 한 번 그린 뒤 경로를 출력한다
@@ -20,7 +19,6 @@ from concurrent.futures import ThreadPoolExecutor
 from html import escape
 
 BASE = '/tmp/progress-board'
-PANES = os.path.join(BASE, 'panes')    # /progress 를 직접 돌린 세션 (render.py 가 씀)
 AUTO = os.path.join(BASE, 'auto')      # 대화 기록으로 자동 생성한 단계
 OUT = os.path.join(BASE, 'index.html')
 PIDFILE = os.path.join(BASE, 'watch.pid')
@@ -198,7 +196,7 @@ def llm(system, user, sid=None):
 
 PROMPT = '''아래는 한 AI 코딩 세션의 대화 기록이다 (U=사용자, A=AI). 사용자는 목표 하나를 정해 두지 않고, 한 세션에서 일을 하나 끝내면 다음 일을 맡기는 식으로 쓴다. 이 세션에서 맡긴 일들을 JSON 하나로만 출력하라. 설명·코드블록 없이 JSON 만.
 
-{"title": "...", "summary": "...", "last_reply": "...", "needs_reply": true, "steps": [{"label": "...", "state": "done|now|left|blocked|side", "detail": "..."}], "items": [{"label": "...", "state": "done|now|open", "detail": "..."}]}
+{"title": "...", "summary": "...", "last_reply": "...", "steps": [{"label": "...", "state": "done|now|left|blocked|side", "detail": "..."}], "items": [{"label": "...", "state": "done|now|open", "detail": "..."}]}
 
 - title: 이 세션이 붙잡고 있는 큰 일(사용자가 해결하려는 목표)을 구체적인 명사구로.
   그 목표를 위한 세부 작업(조사·검토·PR 하나 등)은 제목이 아니라 steps 로 쓴다.
@@ -206,7 +204,6 @@ PROMPT = '''아래는 한 AI 코딩 세션의 대화 기록이다 (U=사용자, 
 - <이전 정리> 가 주어지면 그것을 이어서 고친다. 큰 일이 그대로면 title 을 유지하고, 이미 있던 단계는 이름·순서를 되도록 그대로 두고 새 진행만 반영한다.
 - summary: 이 세션에서 무엇을 해 왔고 지금 무엇을 하는지 1~2문장(60~120자).
 - last_reply: AI 의 마지막 답이 무엇을 말했는지 1문장(40~100자). 질문으로 끝났으면 무엇을 묻는지 쓴다.
-- needs_reply: AI 의 마지막 답이 사용자의 결정·승인·답을 기다리면 true.
 - steps: 이 세션의 작업 흐름을 시간 순서로 쓴 단계 목록.
   처음 붙잡은 일의 단계에 더해, **그 일을 끝낸 뒤 사용자가 이어서 맡긴 일도 새 단계로 계속 이어 붙인다** (목표를 정하고 쭉 가는 세션이면 그 목표의 단계, 하나 끝내고 또 시키는 세션이면 맡긴 일마다 한 단계).
   같은 일에 대한 자잘한 수정·질문은 한 단계로 묶는다.
@@ -296,13 +293,13 @@ def codex_files(worktree_path):
 
 
 def transcript(path, start=0):
-    """대화 기록을 U:/A: 줄로. start 를 주면 그 바이트 위치 뒤에 새로 쌓인 부분만 읽는다."""
+    """대화 기록을 U:/A: 줄로. start 를 주면 그 바이트 위치 뒤에 새로 쌓인 부분만 읽는다.
+    start 는 늘 줄의 시작이다(line_end 로 저장). 끝이 안 난 마지막 줄은 다음 번에 읽는다."""
     msgs = []
-    with open(path, encoding='utf-8', errors='ignore') as fh:
-        if start:
-            fh.seek(start)
-            fh.readline()  # 중간에서 잘린 줄은 버린다
-        for line in fh:
+    with open(path, 'rb') as fh:
+        fh.seek(start)
+        data = fh.read()
+        for line in data[:data.rfind(b'\n') + 1].decode('utf-8', 'ignore').splitlines():
             try:
                 d = json.loads(line)
             except ValueError:
@@ -323,6 +320,15 @@ def transcript(path, start=0):
     head = '\n'.join(msgs[:2])
     tail = '\n'.join(msgs[2:])[-60000:]
     return head + '\n...\n' + tail
+
+
+def line_end(path):
+    """끝까지 쓰인 마지막 줄 바로 뒤의 바이트 위치. 다음 이어 읽기는 여기서 시작한다."""
+    with open(path, 'rb') as fh:
+        size = fh.seek(0, 2)
+        fh.seek(max(0, size - 1048576))
+        tail = fh.read()
+    return size - len(tail) + tail.rfind(b'\n') + 1
 
 
 # ---------- 단계 생성 ----------
@@ -355,15 +361,18 @@ def summarize(path):
         if old.get('size') == size or fresh:
             return old
     try:
+        end = line_end(path)  # 여기까지 읽었다고 기록한다. 그 뒤에 쌓이는 줄은 다음 번에 읽는다
         base = old if old and old.get('title') and old.get('pos') and old['pos'] <= size else None
+        if base and any(l.startswith('U: ') for l in transcript(path, base['pos']).splitlines()):
+            base = None  # 사용자가 새로 요청했으면 이어 쓰지 않고 처음부터 다시 정리한다 (지난 '지금 단계'가 굳는 것을 막는다)
         if base:
             # 이어 쓰기: 지난 정리 + 그 뒤에 새로 쌓인 대화만 보낸다. 처음부터 다시 짓지 않는다
-            prev = {k: base.get(k) for k in ('title', 'summary', 'last_reply', 'needs_reply', 'steps', 'items')}
+            prev = {k: base.get(k) for k in ('title', 'summary', 'last_reply', 'steps', 'items')}
             body = ('<이전 정리>\n%s\n</이전 정리>\n\n<새 기록>\n%s\n</새 기록>\n\n'
                     '이전 정리에 새 기록에서 일어난 진행만 반영해 같은 형식의 JSON 전체를 다시 출력하라. '
                     'title 은 그대로 둔다(새 기록에서 사용자가 이전 일을 끝내고 전혀 다른 큰 일을 새로 맡겼을 때만 바꾸고 "new_task": true 를 넣는다). '
                     'done 단계·done 일은 이름과 내용을 바꾸지 않는다. 이전 정리의 left 단계가 새 기록에서 이미 끝났으면 done 으로, 더 이상 하지 않기로 했으면 빼고, '
-                    '아직 남아 있으면 그대로 left 로 둔다. summary·last_reply·needs_reply 는 새 기록 기준으로 고친다.'
+                    '아직 남아 있으면 그대로 left 로 둔다. summary·last_reply 는 새 기록 기준으로 고친다.'
                     % (json.dumps(prev, ensure_ascii=False), mask(transcript(path, base['pos']))))
         else:
             body = '<기록>\n%s\n</기록>\n\n위 기록을 지시한 JSON 하나로만 출력하라.' % mask(transcript(path))
@@ -390,9 +399,9 @@ def summarize(path):
             j = next((k for k, f in enumerate(flow) if f['state'] in ('done', 'side')), 0)
             flow.pop(j)
         flow = tidy_steps(flow)
-        res = {'size': size, 'pos': size, 'at': time.time(), 'title': title,
+        res = {'size': size, 'pos': end, 'at': time.time(), 'title': title,
                'summary': data.get('summary'), 'last_reply': data.get('last_reply'),
-               'needs_reply': bool(data.get('needs_reply')), 'steps': flow, 'items': items[-7:], 'ok_at': time.time(), 'by': by}
+               'steps': flow, 'items': items[-7:], 'ok_at': time.time(), 'by': by}
     except Exception as e:
         sys.stderr.write('summarize %s: %s\n' % (key, str(e)[:200]))
         # 실패해도 1분은 다시 부르지 않는다 (5초마다 무거운 호출을 반복하지 않게)
@@ -454,18 +463,6 @@ def digest(lines):
     last = block[-1] if block else ''
     waiting = bool(re.search(r'(\?|까요\??|주세요\.?)$', last))
     return {'ask': ask, 'recap': recap, 'block': block[:14], 'waiting': waiting}
-
-
-def load_snapshots():
-    snaps = {}
-    for name in glob.glob(PANES + '/*.json'):
-        try:
-            with open(name, encoding='utf-8') as f:
-                s = json.load(f)
-            snaps[s['pane']] = s
-        except (OSError, ValueError, KeyError):
-            continue
-    return snaps
 
 
 def norm(x):
@@ -534,30 +531,37 @@ def match_sessions(terms, worktrees):
         paths.setdefault(worktrees.get(t['worktreeId'], {}).get('path') or t['worktreePath'], []).append(t)
     for path, panes in paths.items():
         cidx = claude_index(path)
+        cfiles = set(cidx.values())
+        known = load_matches()
         rest = []
         for t in panes:
             f = cidx.get(clean_title(t['title']))
+            if not f and known.get(t['handle']) in cfiles:
+                f = known[t['handle']]
             if f:
                 t['log'] = f
             elif pane_state(t['title']) == 'unknown':
                 rest.append(t)
+        save_matches({t['handle']: t['log'] for t in panes if t.get('log') in cfiles})
         if not rest:
             continue
         files = [(f, codex_user_msgs(f)) for f in sorted(codex_files(path), key=os.path.getmtime, reverse=True)]
-        known = load_matches()
         used = set()
         names = codex_thread_names()
         by_id = {re.sub(r'.*-([0-9a-f]{8}-[0-9a-f-]{27})\.jsonl$', r'\1', f): f for f, _ in files}
+        heads = [t['title'].split(' | ')[0].strip() for t in rest]
         for t in rest:
-            # 1순위: 창 제목(Codex 스레드 이름) → session_index 의 id → 기록 파일
-            tid = names.get(t['title'].split(' | ')[0].strip())
-            if tid and tid in by_id:
+            # 1순위: 창 제목(Codex 스레드 이름) → session_index 의 id → 기록 파일. 같은 이름 창이 여럿이면 못 가린다
+            head = t['title'].split(' | ')[0].strip()
+            tid = names.get(head) if heads.count(head) == 1 else None
+            if tid and tid in by_id and by_id[tid] not in used:
                 t['log'] = by_id[tid]
                 used.add(t['log'])
                 continue
             prev = known.get(t['handle'])
-            if prev and os.path.exists(prev):
+            if prev and os.path.exists(prev) and prev not in used:
                 t['log'] = prev
+                used.add(prev)
             ask = norm(digest(read_tail(t['handle']))['ask'])[:20]
             if len(ask) < 6:
                 continue
@@ -649,6 +653,32 @@ def layout_handles():
     return found
 
 
+ORCH = {'at': 0, 'parent': {}, 'last': {}}
+
+
+def orch_links():
+    """오케스트레이션 작업 창(paneKey) → 부른 세션 paneKey. 작업 창이 보낸 메시지의 Run 과 그 Run 의 호출자로 잇는다.
+    오르카 명령 2개가 들어서 1분에 한 번만 다시 묻는다."""
+    if time.time() - ORCH['at'] < 60:
+        return ORCH
+    ORCH['at'] = time.time()
+    try:
+        runs = orca('orchestration', 'run-list')
+        coord = {r['id']: r.get('coordinator_pane_key') for r in (runs.get('runs', runs) if isinstance(runs, dict) else runs)}
+        box = orca('orchestration', 'inbox', '--limit', '300')
+        msgs = box.get('messages', box) if isinstance(box, dict) else box
+    except Exception:
+        return ORCH
+    parent, last = {}, {}
+    for m in msgs:  # 최근 메시지부터 온다
+        k, c = m.get('sender_pane_key'), coord.get(m.get('run_id'))
+        if k and c and k != c and k not in parent:
+            parent[k] = c
+            last[k] = (m.get('type'), m.get('subject') or '', m.get('body') or '')
+    ORCH.update(parent=parent, last=last)
+    return ORCH
+
+
 def orca_agents():
     try:
         return {a['paneKey']: a for w in orca('worktree', 'ps')['worktrees'] for a in w.get('agents', [])}
@@ -656,7 +686,7 @@ def orca_agents():
         return {}
 
 
-def status_of(t, steps_need_reply, dg):
+def status_of(t):
     """작업 중 = 오르카 에이전트 상태(없으면 제목의 진행 기호, Codex 는 20초 안 출력). 나머지는 전부 내 차례."""
     state = pane_state(t['title'])
     agent = t.get('agent') or {}
@@ -942,7 +972,10 @@ def mini_steps(flow, busy):
     return '<ol class="mini">%s</ol>' % rows
 
 
-def render(t, steps, manual, ws):
+SUB_LABEL = {'busy': 'Working', 'done': 'Done', 'wait': 'Waiting'}
+
+
+def render(t, steps, ws):
     """카드(보드용)와 상세 창(카드를 눌렀을 때)을 함께 만든다."""
     steps = steps or {}
     items = steps.get('items') or []
@@ -952,7 +985,7 @@ def render(t, steps, manual, ws):
         dg['full'] = agent['lastAssistantMessage']
     if agent.get('prompt'):
         dg['ask'] = agent['prompt']
-    st = status_of(t, steps.get('needs_reply'), dg)
+    st = status_of(t)
     since = since_of(t, st)
     cid = re.sub(r'[^A-Za-z0-9]', '', t['paneKey'])[-16:]
     title = escape(steps.get('title') or clean_title(t['title']) or '(untitled)')
@@ -998,13 +1031,33 @@ def render(t, steps, manual, ws):
             stale += ('<span class="stuck" title="Working, but the transcript has not changed for %d min. It may be running a long command or stuck on a tool.">'
                       '<i></i>No progress for %dm</span>' % (idle // 60, idle // 60))
             t['_stuck'] = True
+    subs = []
+    for s in t.get('subs') or []:
+        a = s.get('agent') or {}
+        kind, subj, body = ORCH['last'].get(s['paneKey'], ('', '', ''))
+        sst = {'working': 'busy', 'done': 'done'}.get(a.get('state')) or \
+            ('done' if kind == 'worker_done' else ('busy' if status_of(s) == 'busy' else 'wait'))
+        who = a.get('agentType') or ('claude' if pane_state(s['title']) != 'unknown' else 'codex')
+        subs.append((s['handle'], sst, who.capitalize(), a.get('taskTitle') or clean_title(s['title']) or '',
+                     subj if kind == 'worker_done' else '', body if kind == 'worker_done' else ''))
+    sub_card = ('<div class="subs">%s</div>' % ''.join(
+        '<span class="sub %s">↳ %s · <b>%s</b>%s</span>' % (sst, escape(who), SUB_LABEL[sst], (' · ' + escape(res[:50])) if res else '')
+        for _, sst, who, _, res, _ in subs)) if subs else ''
+    sub_modal = ('<h4>Helpers</h4><div class="helpers">%s</div>' % ''.join(
+        '<div class="helper %s"><span class="sub %s"><b>%s</b> · %s</span><p>%s</p>%s'
+        '<button class="go" onclick="go(\'%s\')">Go ↗</button>%s</div>'
+        % (sst, sst, escape(who), SUB_LABEL[sst], escape((res or what)[:120]),
+           ('<details class="hres"><summary>%s</summary><div class="md">%s</div></details>'
+            % (escape(body[:160].replace('\n', ' ')) + ('…' if len(body) > 160 else ''), md(body[:6000]))) if body else '', h,
+           '<button class="end" data-title="%s" onclick="askEnd(\'%s\', this)">Close</button>' % (escape(who + ': ' + what[:60]), h) if sst == 'done' else '')
+        for h, sst, who, what, res, body in subs)) if subs else ''
     sidchip = ('<button class="sid" title="Click to copy: %s" onclick="cp(this,\'%s\')">ID %s</button>' % (escape(resume), sid, sid[:8])) if sid else ''
     chip = '<i class="model">%s</i>' % escape(model) if model else ''
     card = ('<a class="card %s" href="#c%s" draggable="true" data-h="%s" data-st="%s" data-wid="%s" data-title="%s"><div class="row"><span><b class="badge">%s</b>%s</span><small>%s</small></div>'
             '<h3>%s</h3>%s%s%s'
             '</a>'
             % (st, cid, t['handle'], st, escape(t['worktreeId']), title, LABEL[st], chip, (lambda h: h if h == 'just now' else h + (' waiting' if st == 'wait' else ' working'))(for_how_long(since)), title, stale, (mini_steps(flow, st == 'busy') + seg_steps(flow)) if flow else '',
-               ''))  # 마지막 답은 카드에서 빼고 상세 창에서만 보여준다
+               sub_card))  # 마지막 답은 카드에서 빼고 상세 창에서만 보여준다. 대신 부른 작업 창을 한 줄씩
     modal = ('<div class="modal %s" id="c%s"><a class="bg" href="#"></a><div class="box">'
              '<div class="row"><span class="meta2"><b class="badge">%s</b><b class="ws">%s</b>%s%s%s</span><a class="x" href="#">Close ✕</a></div>'
              '<div class="hero">%s<div><h2>%s</h2><p class="sum">%s</p>'
@@ -1014,13 +1067,13 @@ def render(t, steps, manual, ws):
              % (st, cid, LABEL[st], escape(ws), chip, sidchip, stale, ring(sum(1 for f in flow if f['state'] in ('done', 'side')), len(flow)), title, summary, t['handle'], t['handle'],
                 render_flow(flow, st == 'busy', newest_first=False) if flow else '<p class="none">No steps yet</p>',
                 '<h4>Last reply</h4><div class="replybox"><p>%s</p></div>' % reply if reply else '',
-                render_todo(items, t.get('log')), render_more(dg, items)))
+                sub_modal + render_todo(items, t.get('log')), render_more(dg, items)))
     order = (0, since) if st == 'wait' else (1, -since)  # 오래 기다린 내 차례가 맨 위
     cur_step = next((f for f in flow if f['state'] in ('blocked', 'now')), None)
     t['_info'] = {'ws': ws, 'fail': bool(t.get('_fail')), 'stuck': bool(t.get('_stuck')), 'wid': t['worktreeId'], 'log': t.get('log') or '', 'cwd': t.get('worktreePath') or '', 'status': st, 'title': steps.get('title') or clean_title(t['title']),
                   'step': cur_step['label'] if cur_step else '',
                   'done': sum(1 for f in flow if f['state'] in ('done', 'side')), 'total': len(flow),
-                  'model': model, 'since': since, 'handle': t['handle'], 'order': order,
+                  'model': model, 'since': since, 'handle': t['handle'], 'order': order, 'helpers': [x[0] for x in subs],
                   'summary': steps.get('summary') or '',
                   'note': '' if flow else ('Summarizing…' if t.get('log') else 'Transcript not found'), 'steps': [{'label': f['label'], 'state': f['state']} for f in flow]}
     return order, card, modal
@@ -1055,8 +1108,15 @@ def _build():
     # 화면 배치(visualLayouts)에도 없고 오르카 에이전트 목록에도 없는 창은 UI 에서 보이지 않는 창이다 → 뺀다
     shown = layout_handles()
     terms = [t for t in terms if t['handle'] in shown or t.get('agent')]
+    # 다른 세션이 오케스트레이션으로 띄운 작업 창(검수·교차 확인)은 따로 카드로 만들지 않고 부른 세션 카드에 붙인다
+    keys = {t['paneKey']: t for t in terms}
+    links = orch_links()['parent']
+    for t in list(terms):
+        p = (t.get('agent') or {}).get('parentPaneKey') or links.get(t['paneKey'])
+        if p in keys and p != t['paneKey']:
+            keys[p].setdefault('subs', []).append(t)
+            terms.remove(t)
     match_sessions(terms, worktrees)
-    snaps = load_snapshots()
 
     logs = sorted({t['log'] for t in terms if t.get('log')})
     steps = {}
@@ -1084,7 +1144,7 @@ def _build():
         else:
             ws = w.get('displayName') or os.path.basename(w.get('path', '') or '')
             rank = w.get('sortOrder') or 0
-        order, card, modal = render(t, steps.get(t.get('log')), None, ws)
+        order, card, modal = render(t, steps.get(t.get('log')), ws)
         count['wait' if order[0] == 0 else 'busy'] += 1
         cols.setdefault((rank, ws), []).append((order, card))
         modals.append(modal)
@@ -1237,7 +1297,7 @@ def serve():
                 return self.send(200, open(STATE, 'rb').read(), 'application/json')
             if u.path == '/switch':
                 h = (q.get('h') or [''])[0]
-                known = {x['handle'] for x in json.load(open(STATE)).get('sessions', [])}
+                known = {h for x in json.load(open(STATE)).get('sessions', []) for h in [x['handle']] + x.get('helpers', [])}
                 if h not in known:  # 지금 목록에 있는 창만 이동시킨다
                     return self.send(404, b'unknown')
                 subprocess.run(['orca', 'terminal', 'switch', '--terminal', h], capture_output=True, timeout=10)
@@ -1288,7 +1348,7 @@ def serve():
             if urlparse(self.path).path != '/close':
                 return self.send(404, b'not found')
             h = self.rfile.read(int(self.headers.get('Content-Length') or 0)).decode().strip()
-            known = {x['handle'] for x in json.load(open(STATE)).get('sessions', [])}
+            known = {h for x in json.load(open(STATE)).get('sessions', []) for h in [x['handle']] + x.get('helpers', [])}
             if h not in known:
                 return self.send(404, b'unknown')
             # 분할 창 하나만 닫는다. --tab 을 붙이면 같은 탭의 다른 창까지 전부 닫히므로 절대 쓰지 않는다
@@ -1611,7 +1671,7 @@ main{display:grid;gap:12px;align-items:start}
   .card .sum{font-size:11.5px}.m{font-size:11px}.seg span{font-size:10.5px}
   .col h2{font-size:12px}}
 @container (max-width:180px){.card .row small{width:100%}.card .reply{display:none}}
-.col h2{font-size:12.5px;font-weight:700;color:var(--ink2);margin:2px 4px 12px}
+.col h2{font-size:12.5px;font-weight:700;color:var(--ink2);margin:2px 4px 12px}.subs{display:flex;flex-direction:column;gap:2px;margin-top:6px}.sub{font-size:11px;color:var(--ink3)}.sub.busy b{color:var(--now)}.sub.done b{color:var(--done)}.sub.wait b{color:var(--wait)}.helpers{margin-bottom:14px}.helper{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:8px 0;border-top:1px solid var(--line)}.helper p{flex-basis:100%;margin:0;font-size:12px;color:var(--ink2)}.helper .go,.helper .end{padding:3px 9px;font-size:11px}.hres{flex-basis:100%;font-size:12px;color:var(--ink2)}.hres summary{cursor:pointer;line-height:1.5}.hres .md{margin-top:6px}
 .col h2 em{font-style:normal;color:var(--ink3);font-weight:400;margin-left:4px}
 .card{display:block;background:var(--card);border-radius:6px;padding:9px 10px 9px 11px;margin-bottom:7px;color:inherit;
 text-decoration:none;box-shadow:0 1px 1px rgba(9,30,66,.2);border-left:4px solid var(--left);margin-bottom:10px}
@@ -1758,13 +1818,13 @@ Only this pane closes; other panes in the tab stay. The transcript is kept so yo
 // 보드를 어디서 열었든(file://, 오르카 탭, 크롬) 로컬 서버 주소로 직접 요청한다
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.className='on';setTimeout(function(){e.className=''},1600)}
 var endTarget=null;
-function askEnd(h,btn){endTarget=h;var t=btn.closest('.box').querySelector('h2').textContent;
+function askEnd(h,btn){endTarget=h;var t=btn.dataset.title||btn.closest('.box').querySelector('h2').textContent;
   document.getElementById('cft').textContent=t;document.getElementById('confirm').className='on'}
 function cancelEnd(){endTarget=null;document.getElementById('confirm').className=''}
 function doEnd(){var h=endTarget;cancelEnd();
-  fetch('http://127.0.0.1:47613/close',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:h})
-  .then(function(){toast('Session ended');location.hash='';setTimeout(function(){location.reload()},1500)})
-  .catch(function(){toast('Board server is not running')})}
+  fetch('http://127.0.0.1:47613/close',{method:'POST',headers:{'Content-Type':'text/plain'},body:h})
+  .then(function(r){if(!r.ok)throw 0;toast('Session ended');location.hash='';setTimeout(function(){location.reload()},1500)})
+  .catch(function(){toast('Could not end the session')})}
 var WS=__WSLIST__,drag=null;
 document.addEventListener('dragstart',function(e){var c=e.target.closest&&e.target.closest('.card');if(!c)return;
   drag={h:c.dataset.h,st:c.dataset.st,wid:c.dataset.wid,title:c.dataset.title};
@@ -1789,7 +1849,7 @@ function tog(li){var done=!li.classList.contains('done');
   ['done','now','open','left'].forEach(function(k){li.classList.remove(k)});li.classList.add(done?'done':'open');
   var em=li.querySelector('em:not(.me)');if(em)em.remove();
   fetch('http://127.0.0.1:47613/toggle',{method:'POST',body:JSON.stringify({log:li.dataset.log,label:li.dataset.label,done:done})})
-  .catch(function(){toast('Board server is not running; not saved')})}
+  .then(function(r){if(!r.ok)throw 0}).catch(function(){li.classList.remove(done?'done':'open');li.classList.add(done?'open':'done');toast('Not saved')})}
 function spark(id,vals){var e=document.getElementById(id);if(!e||!vals.length)return;var mx=Math.max.apply(null,vals)||1,n=vals.length;
   var pts=vals.map(function(v,i){return (n<2?120:i*120/(n-1)).toFixed(1)+','+(26-v/mx*24).toFixed(1)}).join(' ');
   e.innerHTML='<polyline points="'+pts+'" fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke"/>'}
@@ -1799,7 +1859,7 @@ function loadMetrics(){if(location.hash!=='#settings')return;fetch('http://127.0
   document.getElementById('mcpu').textContent=last[1].toFixed(1)+'%';document.getElementById('mmem').textContent=Math.round(last[2])+' MB';
   spark('scpu',s.map(function(x){return x[1]}));spark('smem',s.map(function(x){return x[2]}))})
   .catch(function(){})}
-loadMetrics();setInterval(loadMetrics,5000);addEventListener('hashchange',loadMetrics);
+loadMetrics();setInterval(loadMetrics,5000);addEventListener('hashchange',loadMetrics);document.addEventListener('mousedown',function(e){if(e.target.closest('.modal')&&!e.target.closest('.box')){e.preventDefault();location.hash=''}});addEventListener('keydown',function(e){if(e.key==='Escape'&&location.hash&&location.hash!=='#')location.hash=''});
 function setCfg(o,btn){if(btn){btn.parentNode.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',b===btn)})}
   return fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify(o)})
   .then(function(r){toast(r.ok?'Saved':'Could not save');if(r.ok&&'orcas' in o){var s=document.querySelector('.sea');if(s)s.style.display=o.orcas?'':'none'}})
