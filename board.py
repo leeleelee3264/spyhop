@@ -1491,7 +1491,8 @@ def write_loader():
 
 
 PLIST = os.path.expanduser('~/Library/LaunchAgents/com.spyhop.board.plist')
-HERE = os.path.dirname(os.path.abspath(__file__))
+# brew 로 깔면 버전마다 폴더가 바뀐다(Cellar/spyhop/<버전>). 로그인 자동 시작에는 늘 같은 opt 경로를 남긴다
+HERE = re.sub(r'/Cellar/spyhop/[^/]+', '/opt/spyhop', os.path.dirname(os.path.abspath(__file__)))
 
 
 def autostart_on():
