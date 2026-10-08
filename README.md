@@ -123,13 +123,16 @@ The board stops by itself within 30 minutes once no sessions are open.
 
 How it works, when it runs, privacy and file locations: [docs/details.md](docs/details.md).
 
+## License
+
+Spyhop is available under the [MIT License](LICENSE).
+
 ## TODO
 
 - [ ] **Work without Orca** — find sessions from recent Claude/Codex transcripts and group them by AI topics.
 - [ ] Many groups: minimum column width with sideways scroll; a "reset groups" button.
 - [ ] Try "move to another workspace" end to end with real sessions.
 - [ ] Keep one source of truth for the code.
-- [ ] Add a license.
 - [ ] Notify when a session turns to "My turn".
 - [ ] Show PR status on cards.
 - [ ] Setting for the language of card content.
