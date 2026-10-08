@@ -678,6 +678,18 @@ def layout_handles():
 ORCH = {'at': 0, 'parent': {}, 'last': {}}
 
 
+def gist(body):
+    """결과 보고의 앞 문장 한두 개(200자 안쪽). 전체 보고는 길어서 보드에는 안 싣는다."""
+    out = ''
+    for sent in re.split(r'(?<=[.!?。])\s+', ' '.join(body.split())):
+        if out and len(out) + len(sent) > 200:
+            break
+        out = (out + ' ' + sent).strip()
+        if len(out) >= 90:
+            break
+    return out[:220]
+
+
 def orch_links():
     """오케스트레이션 작업 창(paneKey) → 부른 세션 paneKey. 작업 창이 보낸 메시지의 Run 과 그 Run 의 호출자로 잇는다.
     오르카 명령 2개가 들어서 1분에 한 번만 다시 묻는다."""
@@ -696,7 +708,7 @@ def orch_links():
         k, c = m.get('sender_pane_key'), coord.get(m.get('run_id'))
         if k and c and k != c and k not in parent:
             parent[k] = c
-            last[k] = (m.get('type'), m.get('subject') or '')
+            last[k] = (m.get('type'), m.get('subject') or '', gist(m.get('body') or ''))
     ORCH.update(parent=parent, last=last)
     return ORCH
 
@@ -1068,18 +1080,18 @@ def render(t, steps, ws):
     subs = []
     for s in t.get('subs') or []:
         a = s.get('agent') or {}
-        kind, subj = ORCH['last'].get(s['paneKey'], ('', ''))
+        kind, subj, short = ORCH['last'].get(s['paneKey'], ('', '', ''))
         sst = {'working': 'busy', 'done': 'done'}.get(a.get('state')) or \
             ('done' if kind == 'worker_done' else ('busy' if status_of(s) == 'busy' else 'wait'))
         who = a.get('agentType') or ('claude' if pane_state(s['title']) != 'unknown' else 'codex')
         subs.append((s['handle'], sst, who.capitalize(), a.get('taskTitle') or clean_title(s['title']) or '',
-                     subj if kind == 'worker_done' else ''))
+                     (subj + (' — ' + short if short else '')) if kind == 'worker_done' else ''))
     sub_card = ('<div class="subs">%s</div>' % ''.join(
         '<span class="sub %s">↳ %s · <b>%s</b></span>' % (sst, escape(who), SUB_LABEL[sst]) for _, sst, who, _, _ in subs)) if subs else ''
     sub_modal = ('<h4>Helpers</h4><div class="helpers">%s</div>' % ''.join(
         '<div class="helper %s"><span class="sub %s"><b>%s</b> · %s</span><p>%s</p>'
         '<button class="go" onclick="go(\'%s\')">Go ↗</button>%s</div>'
-        % (sst, sst, escape(who), SUB_LABEL[sst], escape((res or what)[:120]), h,
+        % (sst, sst, escape(who), SUB_LABEL[sst], escape((res or what)[:320]), h,
            '<button class="end" data-title="%s" onclick="askEnd(\'%s\', this)">Close</button>' % (escape(who + ': ' + what[:60]), h) if sst == 'done' else '')
         for h, sst, who, what, res in subs)) if subs else ''
     sidchip = ('<button class="sid" title="Click to copy: %s" onclick="cp(this,\'%s\')">ID %s</button>' % (escape(resume), sid, sid[:8])) if sid else ''
