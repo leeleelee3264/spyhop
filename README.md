@@ -29,10 +29,11 @@ Spyhop turns every session into a card with its steps, its TODOs and whose turn 
 ## Quick start
 
 ```bash
-git clone https://github.com/leeleelee3264/spyhop.git
-cd spyhop
-./spyhop
+brew install leeleelee3264/tap/spyhop
+spyhop
 ```
+
+Or without Homebrew: `git clone https://github.com/leeleelee3264/spyhop.git && cd spyhop && ./spyhop`.
 
 - You need [Orca](https://github.com/stablyai/orca) and the `claude` CLI logged in. Nothing else: no `pip install`.
 - **Without Orca the board stays empty** — Spyhop finds sessions through Orca today.
@@ -108,14 +109,14 @@ An orca icon in the menu bar shows how many sessions are waiting for you. Click 
 To add it, install [SwiftBar](https://github.com/swiftbar/SwiftBar) and link the plugin into SwiftBar's plugin folder:
 
 ```bash
-ln -s "$PWD/menubar/spyhop.5s.py" "<SwiftBar plugin folder>/spyhop.5s.py"
+ln -s "$(brew --prefix)/opt/spyhop/libexec/menubar/spyhop.5s.py" "<SwiftBar plugin folder>/spyhop.5s.py"   # or $PWD/menubar/... from a clone
 ```
 
 The plugin also starts the board whenever Claude or Codex is running.
 
 ## Uninstall
 
-Turn off **Start at login** in Settings, delete the repo folder and `~/.spyhop`, remove the **.spyhop** project from Orca's sidebar, and remove the SwiftBar link if you added one.
+Turn off **Start at login** in Settings, run `brew uninstall spyhop` (or delete the repo folder), delete `~/.spyhop`, remove the **.spyhop** project from Orca's sidebar, and remove the SwiftBar link if you added one.
 The board stops by itself within 30 minutes once no sessions are open.
 
 ## More
