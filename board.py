@@ -714,6 +714,21 @@ def gist(body):
     return out[:220]
 
 
+def iso_ts(x):
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat((x or '').replace('Z', '+00:00')).timestamp()
+    except ValueError:
+        return 0
+
+
+def moved_on(t):
+    """맡은 일을 보고(worker_done)한 뒤에 사람이 그 창에 새 일을 시켰는가. 그러면 더는 작업 창이 아니라 독립 세션이다."""
+    kind, _, _, ts = ORCH['last'].get(t['paneKey'], ('', '', '', 0))
+    started = ((t.get('agent') or {}).get('stateStartedAt') or 0) / 1000
+    return kind == 'worker_done' and started > ts + 120
+
+
 def orch_links():
     """오케스트레이션 작업 창(paneKey) → 부른 세션 paneKey. 작업 창이 보낸 메시지의 Run 과 그 Run 의 호출자로 잇는다.
     오르카 명령 2개가 들어서 1분에 한 번만 다시 묻는다."""
@@ -732,7 +747,7 @@ def orch_links():
         k, c = m.get('sender_pane_key'), coord.get(m.get('run_id'))
         if k and c and k != c and k not in parent:
             parent[k] = c
-            last[k] = (m.get('type'), m.get('subject') or '', gist(m.get('body') or ''))
+            last[k] = (m.get('type'), m.get('subject') or '', gist(m.get('body') or ''), iso_ts(m.get('created_at')))
     ORCH.update(parent=parent, last=last)
     return ORCH
 
@@ -1104,7 +1119,7 @@ def render(t, steps, ws):
     subs = []
     for s in t.get('subs') or []:
         a = s.get('agent') or {}
-        kind, subj, short = ORCH['last'].get(s['paneKey'], ('', '', ''))
+        kind, subj, short, _ = ORCH['last'].get(s['paneKey'], ('', '', '', 0))
         sst = {'working': 'busy', 'done': 'done'}.get(a.get('state')) or \
             ('done' if kind == 'worker_done' else ('busy' if status_of(s) == 'busy' else 'wait'))
         who = a.get('agentType') or ('claude' if pane_state(s['title']) != 'unknown' else 'codex')
@@ -1210,7 +1225,7 @@ def _build():
     links = orch_links()['parent']
     for t in list(terms):
         p = (t.get('agent') or {}).get('parentPaneKey') or links.get(t['paneKey'])
-        if p in keys and p != t['paneKey']:
+        if p in keys and p != t['paneKey'] and not moved_on(t):
             keys[p].setdefault('subs', []).append(t)
             terms.remove(t)
     match_sessions(terms, worktrees)
