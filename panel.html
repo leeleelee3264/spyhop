@@ -70,7 +70,7 @@ var pendingEnd=null;
 function end(ev,h,el){ev.stopPropagation();
   if(pendingEnd!==h){pendingEnd=h;document.querySelectorAll('.x.ask').forEach(function(x){x.classList.remove('ask');x.textContent='End'});
     el.classList.add('ask');el.textContent='Click again to end';setTimeout(function(){if(pendingEnd===h){pendingEnd=null;el.classList.remove('ask');el.textContent='End'}},4000);return}
-  pendingEnd=null;fetch('/close',{method:'POST',headers:{'Content-Type':'text/plain'},body:h})
+  pendingEnd=null;fetch('/close?k=__TOKEN__',{method:'POST',headers:{'Content-Type':'text/plain'},body:h})
     .then(function(r){toast(r.ok?'Session ended':'Could not end session');setTimeout(load,1200)})}
 function render(d){
   if(pendingEnd)return;  // 확인 중에는 다시 그리지 않는다

@@ -89,7 +89,7 @@ Click the gear icon in the header.
 | Setting | What it does |
 |---|---|
 | Summarizer | The AI model that writes the cards (see above). |
-| Theme | Classic (follows macOS dark mode), GitHub Light/Dark, Catppuccin Latte/Mocha, Nord, Dracula, Tokyo Night. |
+| Theme | Light: Classic (follows macOS dark mode), GitHub Light, Catppuccin Latte, Solarized Light, Rosé Pine Dawn. Dark: GitHub Dark, Catppuccin Mocha, Tokyo Night, Dracula, Nord. |
 | Group by | Orca workspace or AI topics. |
 | Orca animation | Little orcas spyhop out of the wave in the header. |
 | Start at login | Starts the board when you log in to the Mac. Off by default. |

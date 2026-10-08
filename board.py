@@ -75,6 +75,22 @@ def load_config():
         return {}
 
 
+def token():
+    """보드 화면에만 심는 열쇠. 바꾸는 요청(POST)은 이 값이 있어야 받는다. 맥을 다시 켜기 전까지 같다."""
+    p = os.path.join(BASE, 'token')
+    try:
+        with open(p) as f:
+            return f.read().strip()
+    except OSError:
+        import secrets
+        k = secrets.token_hex(16)
+        os.makedirs(BASE, exist_ok=True)
+        with open(p, 'w') as f:
+            f.write(k)
+        os.chmod(p, 0o600)
+        return k
+
+
 def save_json(path, obj):
     """임시 파일에 다 쓴 뒤 바꿔 끼운다. 쓰다 멈추거나 둘이 동시에 써도 반쯤 쓴 파일이 남지 않는다."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -214,7 +230,7 @@ PROMPT = '''아래는 한 AI 코딩 세션의 대화 기록이다 (U=사용자, 
 - steps: 이 세션의 작업 흐름을 시간 순서로 쓴 단계 목록.
   처음 붙잡은 일의 단계에 더해, **그 일을 끝낸 뒤 사용자가 이어서 맡긴 일도 새 단계로 계속 이어 붙인다** (목표를 정하고 쭉 가는 세션이면 그 목표의 단계, 하나 끝내고 또 시키는 세션이면 맡긴 일마다 한 단계).
   같은 일에 대한 자잘한 수정·질문은 한 단계로 묶는다.
-  마지막 단계가 지금 하는 일(now)이다.
+  AI 가 지금 하고 있는 일이 now 다. 마지막 답에서 그 일을 끝내고 결과를 보고했으면 그 단계는 done 이다(남은 일이 없으면 now 가 없어도 된다).
   최대 8개, 넘치면 오래된 끝낸 단계부터 뺀다.
   끝낸 단계도 done 으로 포함한다.
   done=끝난 단계, now=지금 단계(최대 1개), blocked=사용자 답·승인을 기다리는 단계, left=AI가 하겠다고 밝힌 남은 단계.
@@ -692,12 +708,25 @@ def orca_agents():
         return {}
 
 
+def codex_turn_done(path):
+    """Codex 기록의 마지막 턴이 끝났는가 (task_complete 가 task_started 보다 뒤)."""
+    try:
+        with open(path, 'rb') as fh:
+            fh.seek(max(0, fh.seek(0, 2) - 300000))
+            tail = fh.read()
+    except OSError:
+        return False
+    return tail.rfind(b'"type":"task_complete"') > tail.rfind(b'"type":"task_started"')
+
+
 def status_of(t):
     """작업 중 = 오르카 에이전트 상태(없으면 제목의 진행 기호, Codex 는 20초 안 출력). 나머지는 전부 내 차례."""
     state = pane_state(t['title'])
     agent = t.get('agent') or {}
     if agent.get('state'):
         state = 'busy' if agent['state'] == 'working' else 'idle'
+    if state == 'unknown' and '/.codex/' in (t.get('log') or ''):
+        state = 'idle' if codex_turn_done(t['log']) else 'busy'
     if state == 'unknown':
         state = 'busy' if time.time() - (t.get('lastOutputAt') or 0) / 1000 < 20 else 'idle'
     return 'busy' if state == 'busy' else 'wait'
@@ -1173,7 +1202,7 @@ def _build():
     head = ('<div class="brand"><b>Spyhop</b><em class="tag">all your AI sessions at a glance</em></div><div class="tiles">%s<a class="gear" href="#settings" title="Settings">' % tiles
             + GEAR + '</a></div>' + (SEA if orcas_on() else ''))
     foot = '<div class="subbar">%s%s<small>updated %s</small></div>' % (grouping, legend, time.strftime('%H:%M:%S'))
-    html = TEMPLATE.replace('__LOADER__', 'file://' + LOADER).replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
+    html = TEMPLATE.replace('__LOADER__', 'file://' + LOADER).replace('__THEME_CSS__', THEME_CSS).replace('__REFRESH_MS__', str(refresh_sec() * 1000)).replace('__TOKEN__', token()).replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1).replace('__HEAD__', head).replace('__TIME__', time.strftime('%H:%M:%S')) \
         .replace('__WSLIST__', wslist.replace('</', '<\\/')).replace('__BODY__', foot + '<main style="grid-template-columns:repeat(%d,minmax(0,1fr))">%s</main>%s' % (max(len(cols), 1), board or '<p class="none">The sea is calm · no sessions running.</p>', ''.join(modals) + render_settings()))
     os.makedirs(BASE, exist_ok=True)
     with open(OUT + '.%d.tmp' % os.getpid(), 'w', encoding='utf-8') as f:
@@ -1257,7 +1286,6 @@ def group_of(key):
 
 
 PORT = 47613
-ORIGIN = 'http://127.0.0.1:%d' % PORT
 SEA = '<div class="sea" aria-hidden="true"></div><script>(function(){var sea=document.querySelector(".sea");if(!sea)return;function fitSea(){var h=sea.parentNode.getBoundingClientRect(),a=document.querySelector(".brand").getBoundingClientRect().right-h.left+16,b=h.right-document.querySelector(".tiles").getBoundingClientRect().left+16;sea.style.left=a+"px";sea.style.right=b+"px"}fitSea();addEventListener("resize",fitSea);function pop(){var o=document.createElement("div");o.className="orca";o.innerHTML=\'<svg viewBox="0 0 32 32" width="100%" height="100%"><path d="M9.6 31 C9 23 9.8 15.6 12 10.2 C13.4 6.8 15.2 4.6 16.9 4.4 C18.7 4.3 20 6.2 20.8 9.2 C22 13.6 22.5 20 22.6 31 Z" fill="#334155"/><ellipse cx="23.6" cy="24.2" rx="2.8" ry="1.1" transform="rotate(-28 23.6 24.2)" fill="#334155"/><g fill="#ffffff"><ellipse cx="18.4" cy="12.2" rx="1.25" ry="3.1" transform="rotate(-12 18.4 12.2)"/><path d="M12.4 9.6 C11.1 13.4 10.4 19 10.6 26 L14.6 26 C14 20.2 13.7 14.8 13.9 7.6 C13.3 8.2 12.8 8.9 12.4 9.6 Z"/></g></svg>\';var w=sea.getBoundingClientRect().width-36;if(w<=0)return;o.style.left=(Math.random()*w)+"px";var k=.75+Math.random()*.5;o.style.width=o.style.height=(36*k)+"px";sea.appendChild(o);setTimeout(function(){o.remove()},3600)}setTimeout(pop,300+Math.random()*1500);(function loop(){setTimeout(function(){pop();loop()},2500+Math.random()*3000)})()})()</script>'  # 헤더 아래에서 가끔 범고래가 고개를 내민다
 PANEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'panel.html')
 
@@ -1284,7 +1312,7 @@ def serve():
             if u.path in ('/', '/board'):
                 return self.send(200, open(OUT, 'rb').read(), 'text/html; charset=utf-8')
             if u.path == '/panel':
-                page = open(PANEL, encoding='utf-8').read().replace('</style>', THEME_CSS + '</style>', 1) \
+                page = open(PANEL, encoding='utf-8').read().replace('</style>', THEME_CSS + '</style>', 1).replace('__TOKEN__', token()) \
                     .replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1)
                 return self.send(200, page.encode(), 'text/html; charset=utf-8')
             if u.path == '/metrics':
@@ -1308,7 +1336,7 @@ def serve():
             return self.send(404, b'not found')
 
         def do_POST(self):
-            if self.headers.get('Origin', ORIGIN) != ORIGIN:
+            if parse_qs(urlparse(self.path).query).get('k') != [token()]:
                 return self.send(403, b'forbidden')
             if urlparse(self.path).path == '/config':
                 req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
@@ -1554,19 +1582,24 @@ THEMES = [
     ('classic', 'Classic', None),
     ('github-light', 'GitHub Light', dict(bg='#f6f8fa', col='#eaeef2', card='#ffffff', line='rgba(31,35,40,.15)', ink='#1f2328', ink2='#424a53', ink3='#59636e',
                                           done='#1a7f37', now='#bf8700', left='#d0d7de', wait='#0969da', busy='#8250df', side='#bf3989')),
-    ('github-dark', 'GitHub Dark', dict(bg='#0d1117', col='#161b22', card='#21262d', line='rgba(240,246,252,.1)', ink='#e6edf3', ink2='#c9d1d9', ink3='#8b949e',
-                                        done='#3fb950', now='#d29922', left='#30363d', wait='#4493f8', busy='#a371f7', side='#db61a2')),
     ('latte', 'Catppuccin Latte', dict(bg='#e6e9ef', col='#dce0e8', card='#eff1f5', line='rgba(76,79,105,.15)', ink='#4c4f69', ink2='#5c5f77', ink3='#8c8fa1',
                                        done='#40a02b', now='#df8e1d', left='#ccd0da', wait='#1e66f5', busy='#8839ef', side='#ea76cb')),
+    ('solarized-light', 'Solarized Light', dict(bg='#f5efdc', col='#eee8d5', card='#fdf6e3', line='rgba(88,110,117,.18)', ink='#073642', ink2='#586e75', ink3='#93a1a1',
+                                                done='#859900', now='#b58900', left='#d9d2bc', wait='#268bd2', busy='#6c71c4', side='#d33682')),
+    ('rose-pine-dawn', 'Rosé Pine Dawn', dict(bg='#faf4ed', col='#f2e9e1', card='#fffaf3', line='rgba(87,82,121,.14)', ink='#575279', ink2='#797593', ink3='#9893a5',
+                                              done='#286983', now='#ea9d34', left='#dfdad9', wait='#d7827e', busy='#907aa9', side='#b4637a')),
+    ('github-dark', 'GitHub Dark', dict(bg='#0d1117', col='#161b22', card='#21262d', line='rgba(240,246,252,.1)', ink='#e6edf3', ink2='#c9d1d9', ink3='#8b949e',
+                                        done='#3fb950', now='#d29922', left='#30363d', wait='#4493f8', busy='#a371f7', side='#db61a2')),
     ('mocha', 'Catppuccin Mocha', dict(bg='#1e1e2e', col='#181825', card='#313244', line='rgba(205,214,244,.1)', ink='#cdd6f4', ink2='#bac2de', ink3='#7f849c',
                                        done='#a6e3a1', now='#f9e2af', left='#45475a', wait='#89b4fa', busy='#cba6f7', side='#f5c2e7')),
-    ('nord', 'Nord', dict(bg='#2e3440', col='#3b4252', card='#434c5e', line='rgba(236,239,244,.1)', ink='#eceff4', ink2='#d8dee9', ink3='#9aa5b8',
-                          done='#a3be8c', now='#ebcb8b', left='#4c566a', wait='#88c0d0', busy='#b48ead', side='#d08770')),
-    ('dracula', 'Dracula', dict(bg='#282a36', col='#21222c', card='#343746', line='rgba(248,248,242,.1)', ink='#f8f8f2', ink2='#d6d6d0', ink3='#6272a4',
-                                done='#50fa7b', now='#ffb86c', left='#44475a', wait='#bd93f9', busy='#ff79c6', side='#8be9fd')),
     ('tokyo', 'Tokyo Night', dict(bg='#1a1b26', col='#16161e', card='#24283b', line='rgba(192,202,245,.1)', ink='#c0caf5', ink2='#a9b1d6', ink3='#565f89',
                                   done='#9ece6a', now='#e0af68', left='#414868', wait='#7aa2f7', busy='#bb9af7', side='#7dcfff')),
+    ('dracula', 'Dracula', dict(bg='#282a36', col='#21222c', card='#343746', line='rgba(248,248,242,.1)', ink='#f8f8f2', ink2='#d6d6d0', ink3='#6272a4',
+                                done='#50fa7b', now='#ffb86c', left='#44475a', wait='#bd93f9', busy='#ff79c6', side='#8be9fd')),
+    ('nord', 'Nord', dict(bg='#2e3440', col='#3b4252', card='#434c5e', line='rgba(236,239,244,.1)', ink='#eceff4', ink2='#d8dee9', ink3='#9aa5b8',
+                          done='#a3be8c', now='#ebcb8b', left='#4c566a', wait='#88c0d0', busy='#b48ead', side='#d08770')),
 ]
+DARK_THEMES = {'github-dark', 'mocha', 'tokyo', 'dracula', 'nord'}
 OLD_THEMES = {'dark': 'github-dark', 'bluegrey': 'github-dark', 'indigo': 'github-light', 'teal': 'github-light', 'purple': 'latte'}  # 예전 머티리얼 테마를 고른 사람
 # 미리보기 카드에서만 쓰는 클래식 색 (실제 클래식은 :root 기본값 + 시스템 다크 모드)
 CLASSIC_PREVIEW = ('.thp[data-theme="classic"]{--bg:#f4f5f8;--col:#ebecf0;--card:#fff;--line:rgba(20,24,40,.12);--ink:#172b4d;--ink2:#44546f;'
@@ -1614,10 +1647,13 @@ def render_settings():
         '<option value="%s"%s>%s</option>' % (m['id'], ' selected' if m['id'] == cur else '', escape(m['name'])) for m in p['models']))
         for p in summarizers())
     th = current_theme()
-    cards = ''.join('<button class="th%s" data-id="%s" onclick="setTheme(\'%s\')">'
+    def card(tid, label):
+        return ('<button class="th%s" data-id="%s" onclick="setTheme(\'%s\')">'
                     '<div class="thp" data-theme="%s"><i class="t1"></i><div class="tc"><i class="tb"></i><i class="tl"></i>'
                     '<span><i class="d done"></i><i class="d now"></i><i class="d left"></i></span></div></div><em>%s</em></button>'
-                    % (' on' if tid == th else '', tid, tid, tid, label) for tid, label, _ in THEMES)
+                    % (' on' if tid == th else '', tid, tid, tid, label))
+    cards = (''.join(card(t, l) for t, l, _ in THEMES if t not in DARK_THEMES),
+             ''.join(card(t, l) for t, l, _ in THEMES if t in DARK_THEMES))
 
     def sec(title, sub, body):
         return '<section class="sg"><div class="sgl"><b>%s</b><small>%s</small></div><div class="sgr">%s</div></section>' % (title, sub, body)
@@ -1625,7 +1661,7 @@ def render_settings():
             '<div class="row"><b class="stt">Settings</b><a class="x" href="#">Close ✕</a></div>'
             + sec('Summarizer', 'Model that writes titles, steps and TODOs',
                   '<select class="sel" onchange="setSum(this.value)">%s</select>' % groups)
-            + sec('Theme', '', '<div class="ths">%s</div>' % cards)
+            + sec('Theme', '', '<div class="thl">Light</div><div class="ths">%s</div><div class="thl">Dark</div><div class="ths">%s</div>' % cards)
             + sec('Group by', 'Orca workspaces, or topics the AI picks' if find_bin('orca') else 'Topics the AI picks (Orca not found)',
                   '<div class="pills">%s</div>' % ''.join(
                       '<button class="%s"%s onclick="setCfg({group_by:\'%s\'},this).then(function(){location.reload()})">%s</button>'
@@ -1813,7 +1849,7 @@ border-radius:12px;padding:10px;gap:8px;flex-wrap:wrap;align-items:center;box-sh
 ::-webkit-scrollbar-corner{background:transparent}
 
 header{position:relative;overflow:hidden}.brand .tag{font-style:normal;font-size:11px;font-weight:500;color:var(--ink3);margin-left:6px}.sea{position:absolute;left:0;right:0;bottom:0;height:44px;pointer-events:none;overflow:hidden}.sea:after{content:"";position:absolute;left:0;right:0;bottom:2px;height:6px;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2232%22%20height%3D%226%22%20viewBox%3D%220%200%2032%206%22%3E%3Cpath%20d%3D%22M0%203%20Q4%200.5%208%203%20T16%203%20T24%203%20T32%203%22%20fill%3D%22none%22%20stroke%3D%22%23cbd5e1%22%20stroke-width%3D%221.4%22/%3E%3C/svg%3E") repeat-x;opacity:.7}.orca{position:absolute;bottom:-1px;width:36px;height:36px;transform:translateY(100%);animation:spy 3.4s ease-in-out forwards}@keyframes spy{0%{transform:translateY(100%) rotate(-8deg)}28%{transform:translateY(6%) rotate(0)}72%{transform:translateY(6%) rotate(4deg)}100%{transform:translateY(100%) rotate(-4deg)}}@media (prefers-reduced-motion:reduce){.orca{display:none}}
-.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.side{background:var(--side)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.box.set{padding:16px 22px 6px}.box.set>.row{padding-bottom:12px}.sg{display:grid;grid-template-columns:170px 1fr;gap:18px;align-items:center;padding:16px 0;border-top:1px solid var(--line)}.sgl b{display:block;font-size:12.5px}.sgl small{display:block;margin-top:2px;font-size:11px;color:var(--ink3);line-height:1.35}.sgr{min-width:0}.sgr .sel{min-width:0;width:100%;max-width:320px}.sgr .pills{width:max-content}.sw{position:relative;display:inline-block;width:38px;height:22px;cursor:pointer}.sw input{display:none}.sw i{position:absolute;inset:0;border-radius:11px;background:var(--left);transition:.2s}.sw i:after{content:'';position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.25)}.sw input:checked+i{background:var(--wait)}.sw input:checked+i:after{left:19px}@media (max-width:640px){.sg{grid-template-columns:1fr;gap:8px}}.mets{display:grid;grid-template-columns:1fr 1fr;gap:10px}.met{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:grid;grid-template-columns:auto 1fr;align-items:center;column-gap:8px;color:var(--wait)}.met span{font-size:11px;color:var(--ink3);grid-column:1/3}.met b{font-size:20px;color:var(--ink)}.met svg{width:100%;height:28px}.met small{grid-column:1/3;font-size:10.5px;color:var(--ink3)}.sel{font:inherit;font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:280px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:5px 12px;font-size:11.5px;color:var(--ink3)}.pills button:not(.on):not([disabled]):hover{background:var(--col);color:var(--ink)}.pills button+button{border-left:1px solid var(--line)}.pills button[disabled]{opacity:.4;cursor:default}.pills button.on{background:var(--wait);color:#fff;font-weight:700}.ths{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:6px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:58px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
+.brand .guide{display:block;margin-top:2px;font-size:10.5px;color:var(--ink3);opacity:.85}.legend{display:flex;gap:12px;margin-top:6px;font-size:10.5px;color:var(--ink3)}.legend span{display:inline-flex;align-items:center;gap:4px}.lg{width:9px;height:9px;border-radius:50%;display:inline-block;border:2px solid transparent;box-sizing:border-box}.lg.done{background:var(--done)}.lg.side{background:var(--side)}.lg.now{background:var(--now)}.lg.blocked{border-color:var(--wait);background:var(--card)}.lg.left{border-color:var(--left);background:var(--card)}.gear{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;color:var(--ink3);margin-left:4px;align-self:center}.gear:hover{background:var(--col);color:var(--ink)}.box.set{width:min(620px,94vw);border-top-color:var(--ink3)}.stt{font-size:15px}.set h4{margin:16px 0 4px}.hint{margin:0 0 8px;color:var(--ink3);font-size:11.5px}.opts{display:grid;gap:6px}.box.set{padding:16px 22px 6px}.box.set>.row{padding-bottom:12px}.sg{display:grid;grid-template-columns:170px 1fr;gap:18px;align-items:center;padding:16px 0;border-top:1px solid var(--line)}.sgl b{display:block;font-size:12.5px}.sgl small{display:block;margin-top:2px;font-size:11px;color:var(--ink3);line-height:1.35}.sgr{min-width:0}.sgr .sel{min-width:0;width:100%;max-width:320px}.sgr .pills{width:max-content}.sw{position:relative;display:inline-block;width:38px;height:22px;cursor:pointer}.sw input{display:none}.sw i{position:absolute;inset:0;border-radius:11px;background:var(--left);transition:.2s}.sw i:after{content:'';position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.25)}.sw input:checked+i{background:var(--wait)}.sw input:checked+i:after{left:19px}@media (max-width:640px){.sg{grid-template-columns:1fr;gap:8px}}.mets{display:grid;grid-template-columns:1fr 1fr;gap:10px}.met{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:grid;grid-template-columns:auto 1fr;align-items:center;column-gap:8px;color:var(--wait)}.met span{font-size:11px;color:var(--ink3);grid-column:1/3}.met b{font-size:20px;color:var(--ink)}.met svg{width:100%;height:28px}.met small{grid-column:1/3;font-size:10.5px;color:var(--ink3)}.sel{font:inherit;font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:280px}.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}.opt:has(input:checked){border-color:var(--wait);background:color-mix(in srgb,var(--wait) 7%,var(--card))}.opt span{display:flex;flex-direction:column}.opt small{color:var(--ink3);font-size:11px}.tog{align-items:center}.seg2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;font-size:12px;color:var(--ink2)}.pills{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pills button{all:unset;cursor:pointer;padding:5px 12px;font-size:11.5px;color:var(--ink3)}.pills button:not(.on):not([disabled]):hover{background:var(--col);color:var(--ink)}.pills button+button{border-left:1px solid var(--line)}.pills button[disabled]{opacity:.4;cursor:default}.pills button.on{background:var(--wait);color:#fff;font-weight:700}.ths{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}.thl{font-size:11px;color:var(--ink3);margin:2px 0 4px}.ths+.thl{margin-top:10px}.th{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-radius:10px;padding:6px;border:2px solid transparent}.th.on{border-color:var(--wait)}.th em{font-style:normal;font-size:11.5px;color:var(--ink2);text-align:center}.thp{background:var(--bg);border-radius:7px;padding:6px;border:1px solid var(--line);display:flex;flex-direction:column;gap:5px;height:58px}.thp .t1{display:block;height:9px;border-radius:3px;background:var(--card)}.thp .tc{position:relative;flex:1;background:var(--card);border-radius:5px;padding:6px 6px 6px 9px}.thp .tb{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--wait)}.thp .tl{display:block;height:6px;width:70%;border-radius:3px;background:var(--ink2);opacity:.6;margin-bottom:6px}.thp .d{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}.thp .d.done{background:var(--done)}.thp .d.now{background:var(--now)}.thp .d.left{background:var(--left)}__THEME_CSS__</style></head><body><div id="toast"></div>
 <div id="dropbar"></div>
 <div id="mconfirm"><div class="cb"><h3>Move to another workspace?</h3><p><b id="mvt"></b><br><br>
 Closes this pane and resumes the same conversation in a split next to the target workspace. The transcript is kept.</p>
@@ -1829,7 +1865,7 @@ function askEnd(h,btn){endTarget=h;var t=btn.dataset.title||btn.closest('.box').
   document.getElementById('cft').textContent=t;document.getElementById('confirm').className='on'}
 function cancelEnd(){endTarget=null;document.getElementById('confirm').className=''}
 function doEnd(){var h=endTarget;cancelEnd();
-  fetch('http://127.0.0.1:47613/close',{method:'POST',headers:{'Content-Type':'text/plain'},body:h})
+  fetch('http://127.0.0.1:47613/close?k=__TOKEN__',{method:'POST',headers:{'Content-Type':'text/plain'},body:h})
   .then(function(r){if(!r.ok)throw 0;toast('Session ended');location.hash='';setTimeout(function(){location.reload()},1500)})
   .catch(function(){toast('Could not end the session')})}
 var WS=__WSLIST__,drag=null;
@@ -1848,14 +1884,14 @@ document.addEventListener('drop',function(e){var b=e.target.closest&&e.target.cl
 var moveTarget=null;
 function cancelMove(){moveTarget=null;document.getElementById('mconfirm').className=''}
 function doMove(){var m=moveTarget;cancelMove();toast('Moving…');
-  fetch('http://127.0.0.1:47613/move',{method:'POST',body:JSON.stringify(m)}).then(function(r){return r.text().then(function(t){toast(t);setTimeout(function(){location.reload()},2500)})})
+  fetch('http://127.0.0.1:47613/move?k=__TOKEN__',{method:'POST',body:JSON.stringify(m)}).then(function(r){return r.text().then(function(t){toast(t);setTimeout(function(){location.reload()},2500)})})
   .catch(function(){toast('Board server is not running')})}
 function cp(b,t){var d=function(){b.classList.add('ok');var o=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=o;b.classList.remove('ok')},1200)};
   if(navigator.clipboard){navigator.clipboard.writeText(t).then(d,function(){prompt('Copy',t)})}else{prompt('Copy',t)}}
 function tog(li){var done=!li.classList.contains('done');
   ['done','now','open','left'].forEach(function(k){li.classList.remove(k)});li.classList.add(done?'done':'open');
   var em=li.querySelector('em:not(.me)');if(em)em.remove();
-  fetch('http://127.0.0.1:47613/toggle',{method:'POST',body:JSON.stringify({log:li.dataset.log,label:li.dataset.label,done:done})})
+  fetch('http://127.0.0.1:47613/toggle?k=__TOKEN__',{method:'POST',body:JSON.stringify({log:li.dataset.log,label:li.dataset.label,done:done})})
   .then(function(r){if(!r.ok)throw 0}).catch(function(){li.classList.remove(done?'done':'open');li.classList.add(done?'open':'done');toast('Not saved')})}
 function spark(id,vals){var e=document.getElementById(id);if(!e||!vals.length)return;var mx=Math.max.apply(null,vals)||1,n=vals.length;
   var pts=vals.map(function(v,i){return (n<2?120:i*120/(n-1)).toFixed(1)+','+(26-v/mx*24).toFixed(1)}).join(' ');
@@ -1868,13 +1904,13 @@ function loadMetrics(){if(location.hash!=='#settings')return;fetch('http://127.0
   .catch(function(){})}
 loadMetrics();setInterval(loadMetrics,5000);addEventListener('hashchange',loadMetrics);document.addEventListener('mousedown',function(e){if(e.target.closest('.modal')&&!e.target.closest('.box')){e.preventDefault();location.hash=''}});addEventListener('keydown',function(e){if(e.key==='Escape'&&location.hash&&location.hash!=='#')location.hash=''});
 function setCfg(o,btn){if(btn){btn.parentNode.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',b===btn)})}
-  return fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify(o)})
+  return fetch('http://127.0.0.1:47613/config?k=__TOKEN__',{method:'POST',body:JSON.stringify(o)})
   .then(function(r){toast(r.ok?'Saved':'Could not save');if(r.ok&&'orcas' in o){var s=document.querySelector('.sea');if(s)s.style.display=o.orcas?'':'none'}})
   .catch(function(){toast('Board server is not running')})}
 function setTheme(t){document.documentElement.dataset.theme=t;
   document.querySelectorAll('.th').forEach(function(b){b.classList.toggle('on',b.dataset.id===t)});
-  fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify({theme:t})}).catch(function(){toast('Board server is not running')})}
-function setSum(v){fetch('http://127.0.0.1:47613/config',{method:'POST',body:JSON.stringify({summarizer:v})})
+  fetch('http://127.0.0.1:47613/config?k=__TOKEN__',{method:'POST',body:JSON.stringify({theme:t})}).catch(function(){toast('Board server is not running')})}
+function setSum(v){fetch('http://127.0.0.1:47613/config?k=__TOKEN__',{method:'POST',body:JSON.stringify({summarizer:v})})
   .then(function(r){toast(r.ok?'Summarizer saved · applies from the next update':'That model is not available')})
   .catch(function(){toast('Board server is not running')})}
 function go(h){fetch('http://127.0.0.1:47613/switch?h='+encodeURIComponent(h),{mode:'no-cors'})
