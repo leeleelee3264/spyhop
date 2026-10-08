@@ -284,15 +284,16 @@ _FILE_CACHE = {}
 
 
 def per_file(fn):
-    """같은 파일이 같은 크기면 다시 읽지 않는다 (대화 기록은 뒤에 붙기만 한다). 파일마다 마지막 값 하나만 둔다."""
+    """파일이 그대로면(크기·수정 시각·inode 가 같으면) 다시 읽지 않는다. 파일마다 마지막 값 하나만 둔다."""
     def wrap(path):
         try:
-            size = os.path.getsize(path)
+            st = os.stat(path)
         except OSError:
             return fn(path)
+        sig = (st.st_size, st.st_mtime_ns, st.st_ino)
         hit = _FILE_CACHE.get((fn.__name__, path))
-        if not hit or hit[0] != size:
-            hit = _FILE_CACHE[(fn.__name__, path)] = (size, fn(path))
+        if not hit or hit[0] != sig:
+            hit = _FILE_CACHE[(fn.__name__, path)] = (sig, fn(path))
         return hit[1]
     return wrap
 
@@ -323,19 +324,36 @@ def claude_index(worktree_path):
     return idx
 
 
+_CODEX_CWD = {}
+_RECHECK = {}          # Codex 창별로 화면을 읽어 짝을 다시 확인한 시각
+_CODEX_LIST = {'at': 0, 'files': []}
+
+
+def codex_cwd(f):
+    if f not in _CODEX_CWD:
+        try:
+            with open(f, encoding='utf-8', errors='ignore') as fh:
+                cwd = json.loads(fh.readline()).get('payload', {}).get('cwd')
+        except (OSError, ValueError):
+            return None  # 아직 쓰는 중이거나 잠깐 못 읽음 → 저장하지 않고 다음에 다시 본다
+        if cwd:
+            _CODEX_CWD[f] = cwd
+        return cwd
+    return _CODEX_CWD[f]
+
+
 def codex_files(worktree_path):
-    out = []
-    for f in glob.glob(os.path.expanduser('~/.codex/sessions/*/*/*/*.jsonl')):
-        if time.time() - os.path.getmtime(f) > 3 * 86400:
-            continue
-        with open(f, encoding='utf-8', errors='ignore') as fh:
+    """최근 3일 Codex 기록 중 이 폴더 것. 파일 목록은 1분에 한 번만 다시 훑는다."""
+    if time.time() - _CODEX_LIST['at'] > 60:
+        files = []
+        for f in glob.glob(os.path.expanduser('~/.codex/sessions/*/*/*/*.jsonl')):
             try:
-                meta = json.loads(fh.readline()).get('payload', {})
-            except ValueError:
-                continue
-        if meta.get('cwd') == worktree_path:
-            out.append(f)
-    return out
+                if time.time() - os.path.getmtime(f) <= 3 * 86400:
+                    files.append(f)
+            except OSError:
+                pass
+        _CODEX_LIST.update(at=time.time(), files=files)
+    return [f for f in _CODEX_LIST['files'] if os.path.exists(f) and codex_cwd(f) == worktree_path]
 
 
 def transcript(path, start=0):
@@ -608,6 +626,9 @@ def match_sessions(terms, worktrees):
             if prev and os.path.exists(prev) and prev not in used:
                 t['log'] = prev
                 used.add(prev)
+                if time.time() - _RECHECK.get(t['handle'], 0) < 60:
+                    continue
+                _RECHECK[t['handle']] = time.time()
             ask = norm(digest(read_tail(t['handle']))['ask'])[:20]
             if len(ask) < 6:
                 continue
@@ -617,6 +638,8 @@ def match_sessions(terms, worktrees):
                 t['log'] = hits[0]
                 used.add(hits[0])
         save_matches({t['handle']: t['log'] for t in rest if t.get('log')})
+        if any(not t.get('log') for t in rest):
+            _CODEX_LIST['at'] = 0  # 새로 생긴 Codex 기록일 수 있다 → 1분 기다리지 않고 다음 갱신 때 다시 훑는다
 
 
 # ---------- 그리기 ----------
@@ -637,6 +660,7 @@ def ago(ms):
 LABEL = {'wait': 'My turn', 'busy': 'Working'}
 
 
+@per_file
 def model_of(path):
     """대화 기록 끝부분에서 마지막으로 쓴 모델을 읽어 사람이 읽는 이름으로 바꾼다."""
     if not path:
@@ -759,6 +783,7 @@ def orca_agents():
         return {}
 
 
+@per_file
 def codex_turn_done(path):
     """Codex 기록의 마지막 턴이 끝났는가 (task_complete 가 task_started 보다 뒤)."""
     try:
@@ -784,6 +809,34 @@ def status_of(t):
 
 
 TURN_CACHE = {}
+
+
+@per_file
+def last_turn(path):
+    """대화 기록의 마지막 사용자 요청과 마지막 AI 답 (상세 창 원문 칸용)."""
+    ask = reply = ''
+    with open(path, 'rb') as fh:
+        fh.seek(max(0, fh.seek(0, 2) - 400000))
+        lines = fh.read().decode('utf-8', 'ignore').splitlines()
+    for line in lines:
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if d.get('type') in ('user', 'assistant') and not d.get('isMeta'):       # Claude
+            role, text = d['type'], text_of(d.get('message', {}).get('content'))
+        elif d.get('type') == 'response_item' and d.get('payload', {}).get('type') == 'message':  # Codex
+            role, text = d['payload'].get('role'), text_of(d['payload'].get('content'))
+        else:
+            continue
+        text = (text or '').strip()
+        if not text or text.startswith('<'):
+            continue
+        if role == 'user':
+            ask = text
+        elif role == 'assistant':
+            reply = text
+    return ask, reply
 
 
 def turn_times(path):
@@ -1064,12 +1117,13 @@ def render(t, steps, ws):
     """카드(보드용)와 상세 창(카드를 눌렀을 때)을 함께 만든다."""
     steps = steps or {}
     items = steps.get('items') or []
-    dg = digest(read_tail(t['handle']))
     agent = t.get('agent') or {}
-    if agent.get('lastAssistantMessage'):
-        dg['full'] = agent['lastAssistantMessage']
-    if agent.get('prompt'):
-        dg['ask'] = agent['prompt']
+    if t.get('log') or agent.get('prompt') or agent.get('lastAssistantMessage'):
+        ask, full = last_turn(t['log']) if t.get('log') else ('', '')
+        dg = {'ask': agent.get('prompt') or ask, 'full': agent.get('lastAssistantMessage') or full,
+              'recap': '', 'block': [], 'waiting': False}
+    else:  # 오르카도 모르고 기록도 못 찾은 창만 화면을 읽는다
+        dg = digest(read_tail(t['handle']))
     st = status_of(t)
     since = since_of(t, st)
     cid = re.sub(r'[^A-Za-z0-9]', '', t['paneKey'])[-16:]
@@ -1085,7 +1139,7 @@ def render(t, steps, ws):
     for f in flow:  # 단계 색은 끝냄·지금·예정 셋만 쓴다 (내 차례 여부는 카드 상태가 이미 보여준다)
         if f['state'] == 'blocked':
             f['state'] = 'now'
-    model = model_of(t.get('log')) or model_from_screen(read_tail(t['handle']))
+    model = model_of(t.get('log')) if t.get('log') else model_from_screen(read_tail(t['handle']))
     sid_m = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$', t.get('log') or '')
     sid = sid_m.group(1) if sid_m else ''
     resume = ('codex resume ' if '/.codex/' in (t.get('log') or '') else 'claude --resume ') + sid if sid else ''
@@ -1162,7 +1216,6 @@ def render(t, steps, ws):
 
 
 BUILD_LOCK = threading.Lock()
-WAKE = threading.Event()      # 요약이 끝나면 감시 루프를 바로 깨워 다시 그린다
 _SUMMARY = {'busy': False}
 
 
@@ -1175,29 +1228,17 @@ def cached_summary(path):
 
 
 def summarize_later(logs):
-    """요약(모델 호출)은 뒤에서 돌린다. 보드는 기다리지 않고 지금 가진 요약으로 그리고, 요약이 끝나면 다시 그린다."""
+    """요약(모델 호출)은 뒤에서 돌린다. 보드는 기다리지 않고 지금 가진 요약으로 그리고, 새 요약은 다음 갱신 때 반영된다."""
     if _SUMMARY['busy']:
         return
     _SUMMARY['busy'] = True
 
-    def stamp():
-        out = {}
-        for l in logs:
-            try:
-                out[l] = os.path.getmtime(os.path.join(AUTO, os.path.basename(l) + '.json'))
-            except OSError:
-                out[l] = 0
-        return out
-
     def work():
-        before = stamp()
         try:
             with ThreadPoolExecutor(6) as ex:
                 list(ex.map(summarize, logs))
         finally:
             _SUMMARY['busy'] = False
-            if stamp() != before:  # 새로 정리된 게 있을 때만 다시 그린다 (없는데 깨우면 쉬지 않고 계속 그린다)
-                WAKE.set()
     threading.Thread(target=work, daemon=True).start()
 
 
@@ -1229,8 +1270,6 @@ def _build():
     # 화면 배치(visualLayouts)에도 없고 오르카 에이전트 목록에도 없는 창은 UI 에서 보이지 않는 창이다 → 뺀다
     shown = layout_handles()
     terms = [t for t in terms if t['handle'] in shown or t.get('agent')]
-    with ThreadPoolExecutor(6) as ex:  # 화면이 바뀐 창만 실제로 읽는다. 여러 창을 한꺼번에
-        list(ex.map(lambda t: read_tail(t['handle']), terms))
     # 다른 세션이 오케스트레이션으로 띄운 작업 창(검수·교차 확인)은 따로 카드로 만들지 않고 부른 세션 카드에 붙인다
     keys = {t['paneKey']: t for t in terms}
     links = orch_links()['parent']
@@ -1402,11 +1441,17 @@ def serve():
             u = urlparse(self.path)
             q = parse_qs(u.query)
             if u.path in ('/', '/board'):
-                if 'spyhop_auto=1' not in (self.headers.get('Cookie') or ''):
+                # 새로고침이면 그 자리에서 다시 그린다. 단, 이미 그리는 중이거나 방금(3초 안) 그렸으면 기다리지 않고 지금 화면을 준다
+                # (요청마다 줄 서서 그리면, 맥이 바쁠 때 탭 여러 개의 새로고침이 쌓여 페이지가 멈춘다)
+                fresh = time.time() - os.path.getmtime(OUT) < 3 if os.path.exists(OUT) else False
+                if 'spyhop_auto=1' not in (self.headers.get('Cookie') or '') and not fresh \
+                        and BUILD_LOCK.acquire(blocking=False):
                     try:
-                        build()
+                        _build()
                     except Exception as e:
                         sys.stderr.write('board: %s\n' % e)
+                    finally:
+                        BUILD_LOCK.release()
                 return self.send(200, open(OUT, 'rb').read(), 'text/html; charset=utf-8')
             if u.path == '/panel':
                 page = open(PANEL, encoding='utf-8').read().replace('</style>', THEME_CSS + '</style>', 1).replace('__TOKEN__', token()) \
@@ -1640,8 +1685,7 @@ def watch():
         except Exception as e:
             sys.stderr.write('board: %s\n' % e)
         sample_metrics()
-        WAKE.wait(refresh_sec())
-        WAKE.clear()
+        time.sleep(refresh_sec())
 
 
 METRICS = []          # 최근 60개 [시각, CPU %(맥 전체 대비), 메모리 MB]
