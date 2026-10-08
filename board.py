@@ -696,7 +696,7 @@ def orch_links():
         k, c = m.get('sender_pane_key'), coord.get(m.get('run_id'))
         if k and c and k != c and k not in parent:
             parent[k] = c
-            last[k] = (m.get('type'), m.get('subject') or '', m.get('body') or '')
+            last[k] = (m.get('type'), m.get('subject') or '')
     ORCH.update(parent=parent, last=last)
     return ORCH
 
@@ -1068,22 +1068,20 @@ def render(t, steps, ws):
     subs = []
     for s in t.get('subs') or []:
         a = s.get('agent') or {}
-        kind, subj, body = ORCH['last'].get(s['paneKey'], ('', '', ''))
+        kind, subj = ORCH['last'].get(s['paneKey'], ('', ''))
         sst = {'working': 'busy', 'done': 'done'}.get(a.get('state')) or \
             ('done' if kind == 'worker_done' else ('busy' if status_of(s) == 'busy' else 'wait'))
         who = a.get('agentType') or ('claude' if pane_state(s['title']) != 'unknown' else 'codex')
         subs.append((s['handle'], sst, who.capitalize(), a.get('taskTitle') or clean_title(s['title']) or '',
-                     subj if kind == 'worker_done' else '', body if kind == 'worker_done' else ''))
+                     subj if kind == 'worker_done' else ''))
     sub_card = ('<div class="subs">%s</div>' % ''.join(
-        '<span class="sub %s">↳ %s · <b>%s</b>%s</span>' % (sst, escape(who), SUB_LABEL[sst], (' · ' + escape(res[:50])) if res else '')
-        for _, sst, who, _, res, _ in subs)) if subs else ''
+        '<span class="sub %s">↳ %s · <b>%s</b></span>' % (sst, escape(who), SUB_LABEL[sst]) for _, sst, who, _, _ in subs)) if subs else ''
     sub_modal = ('<h4>Helpers</h4><div class="helpers">%s</div>' % ''.join(
-        '<div class="helper %s"><span class="sub %s"><b>%s</b> · %s</span><p>%s</p>%s'
+        '<div class="helper %s"><span class="sub %s"><b>%s</b> · %s</span><p>%s</p>'
         '<button class="go" onclick="go(\'%s\')">Go ↗</button>%s</div>'
-        % (sst, sst, escape(who), SUB_LABEL[sst], escape((res or what)[:120]),
-           ('<p class="hres">%s</p>' % (escape(body[:200].replace('\n', ' ')) + ('…' if len(body) > 200 else ''))) if body else '', h,
+        % (sst, sst, escape(who), SUB_LABEL[sst], escape((res or what)[:120]), h,
            '<button class="end" data-title="%s" onclick="askEnd(\'%s\', this)">Close</button>' % (escape(who + ': ' + what[:60]), h) if sst == 'done' else '')
-        for h, sst, who, what, res, body in subs)) if subs else ''
+        for h, sst, who, what, res in subs)) if subs else ''
     sidchip = ('<button class="sid" title="Click to copy: %s" onclick="cp(this,\'%s\')">ID %s</button>' % (escape(resume), sid, sid[:8])) if sid else ''
     chip = '<i class="model">%s</i>' % escape(model) if model else ''
     card = ('<a class="card %s" href="#c%s" draggable="true" data-h="%s" data-st="%s" data-wid="%s" data-title="%s"><div class="row"><span><b class="badge">%s</b>%s</span><small>%s</small></div>'
@@ -1713,7 +1711,7 @@ main{display:grid;gap:12px;align-items:start}
   .card .sum{font-size:11.5px}.m{font-size:11px}.seg span{font-size:10.5px}
   .col h2{font-size:12px}}
 @container (max-width:180px){.card .row small{width:100%}.card .reply{display:none}}
-.col h2{font-size:12.5px;font-weight:700;color:var(--ink2);margin:2px 4px 12px}.subs{display:flex;flex-direction:column;gap:2px;margin-top:6px}.sub{font-size:11px;color:var(--ink3)}.sub.busy b{color:var(--now)}.sub.done b{color:var(--done)}.sub.wait b{color:var(--wait)}.helpers{margin-bottom:14px}.helper{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:8px 0;border-top:1px solid var(--line)}.helper p{flex-basis:100%;margin:0;font-size:12px;color:var(--ink2)}.helper .go,.helper .end{padding:3px 9px;font-size:11px}.helper .hres{flex-basis:100%;margin:0;font-size:12px;line-height:1.5;color:var(--ink3)}
+.col h2{font-size:12.5px;font-weight:700;color:var(--ink2);margin:2px 4px 12px}.subs{display:flex;flex-direction:column;gap:2px;margin-top:6px}.sub{font-size:11px;color:var(--ink3)}.sub.busy b{color:var(--now)}.sub.done b{color:var(--done)}.sub.wait b{color:var(--wait)}.helpers{margin-bottom:14px}.helper{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:8px 0;border-top:1px solid var(--line)}.helper p{flex-basis:100%;margin:0;font-size:12px;color:var(--ink2)}.helper .go,.helper .end{padding:3px 9px;font-size:11px}
 .col h2 em{font-style:normal;color:var(--ink3);font-weight:400;margin-left:4px}
 .card{display:block;background:var(--card);border-radius:6px;padding:9px 10px 9px 11px;margin-bottom:7px;color:inherit;
 text-decoration:none;box-shadow:0 1px 1px rgba(9,30,66,.2);border-left:4px solid var(--left);margin-bottom:10px}
