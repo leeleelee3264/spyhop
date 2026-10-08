@@ -9,6 +9,7 @@ Reference for things the README doesn't need to say.
 | What | A local web board of every Claude Code / Codex session running in Orca |
 | Platform | macOS, Python 3.9+ (standard library only, no `pip install`) |
 | Needs | `orca` CLI on `PATH` · one summarizer: `claude` or `codex` logged in, or a DeepSeek API key |
+| DeepSeek (optional) | Faster summaries (about 6 s per session). Store a key once: `security add-generic-password -s deepseek-api -a "$USER" -w '<key>'` |
 | Start | `./spyhop`, or turn on **Start at login** in Settings |
 | Stops | By itself after 30 minutes with no AI sessions open, and on logout |
 | Is it running? | `curl -s http://127.0.0.1:47613/state.json` returns JSON |

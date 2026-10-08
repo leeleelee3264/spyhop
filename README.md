@@ -35,15 +35,8 @@ spyhop
 
 ## Summarizer
 
-Pick one in **Settings → Summarizer**. Only the ones on your Mac are listed.
-
-| | What you need | Notes |
-|---|---|---|
-| Claude | `claude` CLI logged in | Haiku, Sonnet, Opus, Fable |
-| Codex | `codex` CLI logged in | Models in your Codex list |
-| DeepSeek | `security add-generic-password -s deepseek-api -a "$USER" -w '<key>'` | Fastest, about 6 s per session |
-
-Transcripts are sent to the model you pick. Strings that look like keys and passwords are masked first, but pick a model your organization allows.
+Spyhop uses the AI you already have: a logged-in `claude` or `codex` CLI. Switch models in **Settings → Summarizer**.
+Transcripts go to the model you pick (keys and passwords are masked first), so pick one your organization allows.
 
 ## What you get
 
