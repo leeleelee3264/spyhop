@@ -571,11 +571,11 @@ def match_sessions(terms, worktrees):
             ask = norm(digest(read_tail(t['handle']))['ask'])[:20]
             if len(ask) < 6:
                 continue
-            for f, msgs in files:
-                if f not in used and any(ask in m for m in msgs[-5:]):
-                    t['log'] = f
-                    used.add(f)
-                    break
+            # 같은 문장이 여러 기록에 있으면(오케스트레이션 작업 창은 첫 지시문이 다 같다) 못 가리므로 붙이지 않는다
+            hits = [f for f, msgs in files if f not in used and any(ask in m for m in msgs[-5:])]
+            if len(hits) == 1:
+                t['log'] = hits[0]
+                used.add(hits[0])
         save_matches({t['handle']: t['log'] for t in rest if t.get('log')})
 
 
