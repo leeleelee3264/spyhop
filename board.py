@@ -1319,7 +1319,6 @@ def _build():
         waiting = sum(1 for t in terms if group_of(t.get('log') or t['handle']) == UNSORTED)
         if waiting:
             grouping = ('<div id="grouping"><i class="donut"></i>Grouping %d session%s by topic…</div>'
-                        '<script>setTimeout(function(){if(!location.hash||location.hash===\'#\')location.reload()},2500)</script>'
                         % (waiting, '' if waiting == 1 else 's'))
     cols, modals, count = {}, [], {'wait': 0, 'busy': 0}
     for t in sorted(terms, key=lambda x: -(x.get('lastOutputAt') or 0)):
@@ -1466,7 +1465,8 @@ def serve():
                 # 새로고침이면 그 자리에서 다시 그린다. 단, 이미 그리는 중이거나 방금(3초 안) 그렸으면 기다리지 않고 지금 화면을 준다
                 # (요청마다 줄 서서 그리면, 맥이 바쁠 때 탭 여러 개의 새로고침이 쌓여 페이지가 멈춘다)
                 fresh = time.time() - os.path.getmtime(OUT) < 3 if os.path.exists(OUT) else False
-                if 'spyhop_auto=1' not in (self.headers.get('Cookie') or '') and not fresh \
+                auto = 'auto' in q or 'spyhop_auto=1' in (self.headers.get('Cookie') or '')
+                if not auto and not fresh \
                         and BUILD_LOCK.acquire(blocking=False):
                     try:
                         _build()
@@ -1829,7 +1829,7 @@ def render_settings():
             + sec('Theme', '', '<div class="thl">Light</div><div class="ths">%s</div><div class="thl">Dark</div><div class="ths">%s</div>' % cards)
             + sec('Group by', 'Orca workspaces, or topics the AI picks' if find_bin('orca') else 'Topics the AI picks (Orca not found)',
                   '<div class="pills">%s</div>' % ''.join(
-                      '<button class="%s"%s onclick="setCfg({group_by:\'%s\'},this).then(function(){location.reload()})">%s</button>'
+                      '<button class="%s"%s onclick="setCfg({group_by:\'%s\'},this).then(function(){live()})">%s</button>'
                       % ('on' if group_mode() == k else '', '' if (k == 'ai' or find_bin('orca')) else ' disabled', k, label)
                       for k, label in (('orca', 'Orca workspace'), ('ai', 'AI topics'))))
             + sec('Orca animation', 'Orcas spyhop in the header',
@@ -1925,7 +1925,7 @@ border:1px solid color-mix(in srgb,var(--st) 25%,transparent);border-radius:2px 
 .n.open i{background:var(--open);color:#fff}.n.open .nc{border-color:var(--open)}.n.open em{color:var(--open);font-weight:700}
 .bar{height:4px;background:var(--col);border-radius:2px;overflow:hidden}.bar u{display:block;height:100%;background:var(--done)}
 .none{color:var(--ink3);font-size:12px;margin:4px}
-.modal{display:none;position:fixed;inset:0;z-index:9}.modal:target{display:block}
+.modal{display:none;position:fixed;inset:0;z-index:9}.modal:target{display:block}.card{transition:transform .15s ease,box-shadow .15s ease,border-color .3s ease,background-color .3s ease}.card:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(15,23,42,.10)}.card:active{transform:translateY(0) scale(.995)}.card.changed{animation:changed 1.2s ease}.card.fresh{animation:fresh .35s ease-out}@keyframes changed{0%{box-shadow:0 0 0 2px color-mix(in srgb,var(--st) 55%,transparent)}100%{box-shadow:0 0 0 0 transparent}}@keyframes fresh{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}.modal:target .bg{animation:fadein .16s ease-out}.modal:target .box{animation:popin .18s cubic-bezier(.2,.8,.2,1)}@keyframes fadein{from{opacity:0}to{opacity:1}}@keyframes popin{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}button,.gear,.x,.pills button,.th{transition:background-color .15s ease,color .15s ease,transform .1s ease,border-color .15s ease}button:active,.gear:active,.th:active{transform:scale(.96)}.sb u,.m i,.n i{transition:background-color .4s ease,width .4s ease}@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .bg{position:absolute;inset:0;background:rgba(9,30,66,.5)}
 .box{position:relative;margin:3vh auto;width:min(940px,94vw);max-height:94vh;overflow:auto;background:var(--card);
 border-radius:10px;padding:16px 18px;border-top:5px solid var(--st)}
@@ -2031,7 +2031,7 @@ function askEnd(h,btn){endTarget=h;var t=btn.dataset.title||btn.closest('.box').
 function cancelEnd(){endTarget=null;document.getElementById('confirm').className=''}
 function doEnd(){var h=endTarget;cancelEnd();
   fetch('http://127.0.0.1:47613/close?k=__TOKEN__',{method:'POST',headers:{'Content-Type':'text/plain'},body:h})
-  .then(function(r){if(!r.ok)throw 0;toast('Session ended');location.hash='';setTimeout(function(){location.reload()},1500)})
+  .then(function(r){if(!r.ok)throw 0;toast('Session ended');location.hash='';setTimeout(live,1500)})
   .catch(function(){toast('Could not end the session')})}
 var WS=__WSLIST__,drag=null;
 document.addEventListener('dragstart',function(e){var c=e.target.closest&&e.target.closest('.card');if(!c)return;
@@ -2049,7 +2049,7 @@ document.addEventListener('drop',function(e){var b=e.target.closest&&e.target.cl
 var moveTarget=null;
 function cancelMove(){moveTarget=null;document.getElementById('mconfirm').className=''}
 function doMove(){var m=moveTarget;cancelMove();toast('Moving…');
-  fetch('http://127.0.0.1:47613/move?k=__TOKEN__',{method:'POST',body:JSON.stringify(m)}).then(function(r){return r.text().then(function(t){toast(t);setTimeout(function(){location.reload()},2500)})})
+  fetch('http://127.0.0.1:47613/move?k=__TOKEN__',{method:'POST',body:JSON.stringify(m)}).then(function(r){return r.text().then(function(t){toast(t);setTimeout(live,2500)})})
   .catch(function(){toast('Board server is not running')})}
 function cp(b,t){var d=function(){b.classList.add('ok');var o=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=o;b.classList.remove('ok')},1200)};
   if(navigator.clipboard){navigator.clipboard.writeText(t).then(d,function(){prompt('Copy',t)})}else{prompt('Copy',t)}}
@@ -2092,7 +2092,43 @@ function fit(){var lv=['lv-nosum','lv-noreply','lv-bar','lv-min'];document.query
   var hid=cards.filter(function(a){return a.getBoundingClientRect().bottom>innerHeight}).length;
   if(hid){m.textContent='↓ '+hid+' more below';m.style.display='block'}})}
 fit();var ft;addEventListener('resize',function(){clearTimeout(ft);ft=setTimeout(fit,120)});
-setInterval(function(){if(location.hash&&location.hash!=='#')return;fetch('http://127.0.0.1:47613/state.json',{cache:'no-store'}).then(function(){document.cookie='spyhop_auto=1;max-age=3;path=/';location.reload()}).catch(function(){if(window.top===window)location.href='__LOADER__'})},__REFRESH_MS__)</script>
+
+// 화면은 한 번만 연다. 이후엔 새 화면을 받아 바뀐 부분만 갈아 끼운다(깜빡임·스크롤·열린 창 유지)
+var LAST={main:'',tiles:'',sub:''},cardHtml={},modalHtml={};
+function snap(){document.querySelectorAll('main .card').forEach(function(c){cardHtml[c.dataset.h]=c.outerHTML});
+  document.querySelectorAll('.modal[id^="c"]').forEach(function(m){modalHtml[m.id]=m.innerHTML});
+  var m=document.querySelector('main'),t=document.querySelector('.tiles'),b=document.querySelector('.subbar');
+  LAST.main=m?m.innerHTML:'';LAST.tiles=t?t.innerHTML:'';LAST.sub=b?b.innerHTML:''}
+snap();
+function live(){
+  fetch('http://127.0.0.1:47613/?auto=1',{cache:'no-store'}).then(function(r){if(!r.ok)throw 0;return r.text()}).then(function(txt){
+    var d=new DOMParser().parseFromString(txt,'text/html');
+    var th=d.documentElement.dataset.theme;if(th&&th!==document.documentElement.dataset.theme)document.documentElement.dataset.theme=th;
+    var nt=d.querySelector('.tiles'),ot=document.querySelector('.tiles');
+    if(nt&&ot&&nt.innerHTML!==LAST.tiles){ot.innerHTML=nt.innerHTML;LAST.tiles=nt.innerHTML}
+    var nb=d.querySelector('.subbar'),ob=document.querySelector('.subbar');
+    if(nb&&ob&&nb.innerHTML!==LAST.sub){ob.innerHTML=nb.innerHTML;LAST.sub=nb.innerHTML}
+    var nm=d.querySelector('main'),om=document.querySelector('main');
+    if(nm&&om&&nm.innerHTML!==LAST.main){
+      var y=scrollY,old=cardHtml;cardHtml={};
+      om.setAttribute('style',nm.getAttribute('style')||'');om.innerHTML=nm.innerHTML;LAST.main=nm.innerHTML;
+      om.querySelectorAll('.card').forEach(function(c){cardHtml[c.dataset.h]=c.outerHTML;
+        if(old[c.dataset.h]===undefined)c.classList.add('fresh');else if(old[c.dataset.h]!==c.outerHTML)c.classList.add('changed')});
+      scrollTo(0,y);fit()}
+    var open=location.hash.slice(1),seen={},anchor=document.getElementById('settings');
+    d.querySelectorAll('.modal[id^="c"]').forEach(function(nmod){seen[nmod.id]=1;var cur=document.getElementById(nmod.id);
+      if(!cur){anchor.parentNode.insertBefore(document.importNode(nmod,true),anchor);modalHtml[nmod.id]=nmod.innerHTML;return}
+      if(modalHtml[nmod.id]===nmod.innerHTML)return;modalHtml[nmod.id]=nmod.innerHTML;
+      if(nmod.id===open){var ob2=cur.querySelector('.box'),st=ob2?ob2.scrollTop:0,nb2=nmod.querySelector('.box');
+        cur.className=nmod.className;if(ob2&&nb2){ob2.innerHTML=nb2.innerHTML;ob2.scrollTop=st}}
+      else cur.replaceWith(document.importNode(nmod,true))});
+    document.querySelectorAll('.modal[id^="c"]').forEach(function(m){if(!seen[m.id]&&m.id!==open){m.remove();delete modalHtml[m.id]}});
+    if(document.getElementById('grouping'))setTimeout(live,2500);
+  }).catch(function(){if(window.top===window)location.href='__LOADER__'})}
+setInterval(function(){if(!document.hidden)live()},__REFRESH_MS__);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)live()});
+if(document.getElementById('grouping'))setTimeout(live,2500);
+</script>
 </body></html>'''
 
 if __name__ == '__main__':
