@@ -1081,8 +1081,7 @@ def render(t, steps, ws):
         '<div class="helper %s"><span class="sub %s"><b>%s</b> · %s</span><p>%s</p>%s'
         '<button class="go" onclick="go(\'%s\')">Go ↗</button>%s</div>'
         % (sst, sst, escape(who), SUB_LABEL[sst], escape((res or what)[:120]),
-           ('<details class="hres"><summary>%s</summary><div class="md">%s</div></details>'
-            % (escape(body[:160].replace('\n', ' ')) + ('…' if len(body) > 160 else ''), md(body[:6000]))) if body else '', h,
+           ('<p class="hres">%s</p>' % (escape(body[:200].replace('\n', ' ')) + ('…' if len(body) > 200 else ''))) if body else '', h,
            '<button class="end" data-title="%s" onclick="askEnd(\'%s\', this)">Close</button>' % (escape(who + ': ' + what[:60]), h) if sst == 'done' else '')
         for h, sst, who, what, res, body in subs)) if subs else ''
     sidchip = ('<button class="sid" title="Click to copy: %s" onclick="cp(this,\'%s\')">ID %s</button>' % (escape(resume), sid, sid[:8])) if sid else ''
@@ -1714,7 +1713,7 @@ main{display:grid;gap:12px;align-items:start}
   .card .sum{font-size:11.5px}.m{font-size:11px}.seg span{font-size:10.5px}
   .col h2{font-size:12px}}
 @container (max-width:180px){.card .row small{width:100%}.card .reply{display:none}}
-.col h2{font-size:12.5px;font-weight:700;color:var(--ink2);margin:2px 4px 12px}.subs{display:flex;flex-direction:column;gap:2px;margin-top:6px}.sub{font-size:11px;color:var(--ink3)}.sub.busy b{color:var(--now)}.sub.done b{color:var(--done)}.sub.wait b{color:var(--wait)}.helpers{margin-bottom:14px}.helper{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:8px 0;border-top:1px solid var(--line)}.helper p{flex-basis:100%;margin:0;font-size:12px;color:var(--ink2)}.helper .go,.helper .end{padding:3px 9px;font-size:11px}.hres{flex-basis:100%;font-size:12px;color:var(--ink2)}.hres summary{cursor:pointer;line-height:1.5}.hres .md{margin-top:6px}
+.col h2{font-size:12.5px;font-weight:700;color:var(--ink2);margin:2px 4px 12px}.subs{display:flex;flex-direction:column;gap:2px;margin-top:6px}.sub{font-size:11px;color:var(--ink3)}.sub.busy b{color:var(--now)}.sub.done b{color:var(--done)}.sub.wait b{color:var(--wait)}.helpers{margin-bottom:14px}.helper{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:8px 0;border-top:1px solid var(--line)}.helper p{flex-basis:100%;margin:0;font-size:12px;color:var(--ink2)}.helper .go,.helper .end{padding:3px 9px;font-size:11px}.helper .hres{flex-basis:100%;margin:0;font-size:12px;line-height:1.5;color:var(--ink3)}
 .col h2 em{font-style:normal;color:var(--ink3);font-weight:400;margin-left:4px}
 .card{display:block;background:var(--card);border-radius:6px;padding:9px 10px 9px 11px;margin-bottom:7px;color:inherit;
 text-decoration:none;box-shadow:0 1px 1px rgba(9,30,66,.2);border-left:4px solid var(--left);margin-bottom:10px}
