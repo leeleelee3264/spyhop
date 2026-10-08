@@ -1180,13 +1180,24 @@ def summarize_later(logs):
         return
     _SUMMARY['busy'] = True
 
+    def stamp():
+        out = {}
+        for l in logs:
+            try:
+                out[l] = os.path.getmtime(os.path.join(AUTO, os.path.basename(l) + '.json'))
+            except OSError:
+                out[l] = 0
+        return out
+
     def work():
+        before = stamp()
         try:
             with ThreadPoolExecutor(6) as ex:
                 list(ex.map(summarize, logs))
         finally:
             _SUMMARY['busy'] = False
-            WAKE.set()
+            if stamp() != before:  # 새로 정리된 게 있을 때만 다시 그린다 (없는데 깨우면 쉬지 않고 계속 그린다)
+                WAKE.set()
     threading.Thread(target=work, daemon=True).start()
 
 
