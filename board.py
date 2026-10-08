@@ -325,6 +325,7 @@ def claude_index(worktree_path):
 
 
 _CODEX_CWD = {}
+_COORD = {}            # 오르카 작업 창 → 부른 세션 창 (작업 지시문에 적힌 호출자)
 _RECHECK = {}          # Codex 창별로 화면을 읽어 짝을 다시 확인한 시각
 _CODEX_LIST = {'at': 0, 'files': []}
 
@@ -633,7 +634,17 @@ def match_sessions(terms, worktrees):
                 if time.time() - _RECHECK.get(t['handle'], 0) < 60:
                     continue
                 _RECHECK[t['handle']] = time.time()
-            ask = norm(digest(read_tail(t['handle']))['ask'])[:20]
+            raw = digest(read_tail(t['handle']))['ask']
+            coord = re.search(r"coordinator's terminal handle is: (term_[0-9a-f-]+)", raw or '')
+            if coord:
+                _COORD[t['handle']] = coord.group(1)
+            task = re.search(r'task_[0-9a-f]{8,}', raw or '')
+            if task:  # 오르카 작업 창: 첫 지시문은 다 같으니, 그 안의 작업 번호로 기록을 정확히 찾는다
+                ask = task.group(0)
+            elif (raw or '').startswith('You are working inside Orca'):
+                continue
+            else:
+                ask = norm(raw)[:20]
             if len(ask) < 6:
                 continue
             # 같은 문장이 여러 기록에 있으면(오케스트레이션 작업 창은 첫 지시문이 다 같다) 못 가리므로 붙이지 않는다
@@ -1283,6 +1294,13 @@ def _build():
             keys[p].setdefault('subs', []).append(t)
             terms.remove(t)
     match_sessions(terms, worktrees)
+    # 오르카 기록에서 짝이 사라진 오래된 작업 창도, 작업 지시문에 적힌 호출자가 보드에 있으면 그 카드 아래로
+    by_handle = {t['handle']: t for t in terms}
+    for t in list(terms):
+        c = by_handle.get(_COORD.get(t['handle']))
+        if c is not None and c is not t and not moved_on(t):
+            c.setdefault('subs', []).append(t)
+            terms.remove(t)
     alive = len(terms)
     # 대화 기록을 못 찾은 창은 보여줄 게 없다(빈 "Codex ready" 카드). 기록이 붙으면 그때 나온다
     terms = [t for t in terms if t.get('log')]
