@@ -38,7 +38,10 @@ Typical cost on a Mac with ~6 sessions: about 70–80 MB of memory and around 1%
    - The first call reads the whole conversation. After that it only sends the previous summary plus the new part of the conversation, so titles and finished steps stay put.
    - When the new part contains a new request from you, the session is summarized from scratch instead, so the current step can't get stuck.
    - Each session is re-summarized at most once per 1–5 minutes, depending on the update interval.
-4. Helper panes started through Orca orchestration are attached to the session that started them (via `parentPaneKey`, or the orchestration run's coordinator).
+4. Helper panes started through Orca orchestration are attached to the session that started them (via `parentPaneKey`, or the orchestration run's coordinator). Spyhop doesn't guess from names or content: any pane another session opened through Orca becomes a helper line, whether it is a cross-check, a review or a build.
+   - A helper that reports done and then gets new work (more than 2 minutes later) becomes its own card.
+   - Helpers are never closed automatically.
+   - A cross-check run without Orca (the `codex` or `claude` CLI called from a session, or an in-process subagent) opens no pane, so it only shows up as a step in the calling session.
 5. It renders the board right away with the summaries it already has and serves it on `127.0.0.1`. Summaries are refreshed in the background, and the board is redrawn as soon as they land. Reloading the page redraws it on the spot.
 
 Panes whose transcript can't be found are left off the board.
