@@ -555,8 +555,9 @@ MATCHES = os.path.join(BASE, 'codex-match.json')
 
 
 def codex_thread_names():
-    """Codex 가 스레드 이름을 남기는 색인: 이름 → 가장 최근 id."""
-    out = {}
+    """Codex 가 스레드 이름을 남기는 색인: 이름 → id. 여러 대화가 같은 이름이면(오케스트레이션 작업 창은 모두
+    "Report task outcome") 어느 것인지 모르므로 뺀다."""
+    out, dup = {}, set()
     try:
         with open(os.path.expanduser('~/.codex/session_index.jsonl'), encoding='utf-8') as f:
             for line in f:
@@ -564,11 +565,14 @@ def codex_thread_names():
                     d = json.loads(line)
                 except ValueError:
                     continue
-                if d.get('thread_name'):
-                    out[d['thread_name']] = d['id']
+                n = d.get('thread_name')
+                if n:
+                    if n in out and out[n] != d['id']:
+                        dup.add(n)
+                    out[n] = d['id']
     except OSError:
         pass
-    return out
+    return {n: i for n, i in out.items() if n not in dup}
 
 
 def load_matches():
