@@ -1152,7 +1152,9 @@ def render(t, steps, ws):
     open_chip = '<b class="open">%d open</b>' % len(opened) if opened else ''
     flow = tidy_steps([dict(f) for f in steps.get('steps') or []])
     for f in flow:  # 단계 색은 끝냄·지금·예정 셋만 쓴다 (내 차례 여부는 카드 상태가 이미 보여준다)
-        if f['state'] == 'blocked':
+        if f['state'] == 'now' and st == 'wait':
+            f['state'] = 'done'  # AI 가 턴을 끝내고 내 차례면 지금 하는 일은 없다 (요약 모델이 끝난 일을 now 로 남겨도 바로잡는다)
+        elif f['state'] == 'blocked':
             f['state'] = 'now'
     model = model_of(t.get('log')) if t.get('log') else model_from_screen(read_tail(t['handle']))
     sid_m = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$', t.get('log') or '')
@@ -1185,15 +1187,29 @@ def render(t, steps, ws):
             stale += ('<span class="stuck" title="Working, but the transcript has not changed for %d min. It may be running a long command or stuck on a tool.">'
                       '<i></i>No progress for %dm</span>' % (idle // 60, idle // 60))
             t['_stuck'] = True
-    subs = []
+    subs, helpers = [], []
     for s in t.get('subs') or []:
         a = s.get('agent') or {}
-        kind, subj, short, _ = ORCH['last'].get(s['paneKey'], ('', '', '', 0))
-        sst = {'working': 'busy', 'done': 'done'}.get(a.get('state')) or \
-            ('done' if kind == 'worker_done' else ('busy' if status_of(s) == 'busy' else 'wait'))
+        kind, subj, short, ts = ORCH['last'].get(s['paneKey'], ('', '', '', 0))
+        log = s.get('log')
+        if log and '/.codex/' in log:
+            busy = not codex_turn_done(log)
+        else:
+            busy = a.get('state') == 'working' if a.get('state') else status_of(s) == 'busy'
+        sst = 'busy' if busy else 'done'  # 작업 창은 일하는 중이 아니면 끝난 것이다 (대기로 보이지 않게)
         who = a.get('agentType') or ('claude' if pane_state(s['title']) != 'unknown' else 'codex')
-        subs.append((s['handle'], sst, who.capitalize(), a.get('taskTitle') or clean_title(s['title']) or '',
-                     (subj + (' — ' + short if short else '')) if kind == 'worker_done' else ''))
+        if kind == 'worker_done':
+            res = subj + (' — ' + short if short else '')
+        else:  # 보고 메시지가 오르카 기록에서 밀려났으면 대화 기록의 마지막 답에서 한두 문장
+            res = gist(last_turn(log)[1]) if log and not busy else ''
+        try:
+            when = max(ts, os.path.getmtime(log) if log else 0)
+        except OSError:
+            when = ts
+        helpers.append(s['handle'])
+        subs.append((when, (s['handle'], sst, who.capitalize(), a.get('taskTitle') or clean_title(s['title']) or '', res)))
+    # 교차검증을 여러 번 불렀으면 가장 최근 것 하나만 보여준다
+    subs = [max(subs, key=lambda x: x[0])[1]] if subs else []
     sub_card = ('<div class="subs">%s</div>' % ''.join(
         '<span class="sub %s">↳ %s · <b>%s</b></span>' % (sst, escape(who), SUB_LABEL[sst]) for _, sst, who, _, _ in subs)) if subs else ''
     sub_modal = ('<h4>Helpers</h4><div class="helpers">%s</div>' % ''.join(
@@ -1224,7 +1240,7 @@ def render(t, steps, ws):
     t['_info'] = {'ws': ws, 'fail': bool(t.get('_fail')), 'stuck': bool(t.get('_stuck')), 'wid': t['worktreeId'], 'log': t.get('log') or '', 'cwd': t.get('worktreePath') or '', 'status': st, 'title': steps.get('title') or clean_title(t['title']),
                   'step': cur_step['label'] if cur_step else '',
                   'done': sum(1 for f in flow if f['state'] in ('done', 'side')), 'total': len(flow),
-                  'model': model, 'since': since, 'handle': t['handle'], 'order': order, 'helpers': [x[0] for x in subs],
+                  'model': model, 'since': since, 'handle': t['handle'], 'order': order, 'helpers': helpers,
                   'summary': steps.get('summary') or '',
                   'note': '' if flow else ('Summarizing…' if t.get('log') else 'Transcript not found'), 'steps': [{'label': f['label'], 'state': f['state']} for f in flow]}
     return order, card, modal
