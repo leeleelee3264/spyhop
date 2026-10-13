@@ -11,8 +11,8 @@ def emb(m):
 s = re.sub(r'\{\{([a-z.0-9-]+)\}\}', emb, s)
 open('share.html', 'w', encoding='utf-8').write(s.replace('여기 없는 질문은 <a', '여기 없는 질문은 #team-infra 의 Spyhop 스레드나 <a'))  # 사내판만 사내 채널 안내
 # 공개판: 사내 제목 관례·사내 채널 언급을 뺀다
-p = s.replace('<title>[devops] Spyhop 세션 보드</title>', '<title>Spyhop — AI 세션 보드</title>')
-p = p.replace("'[devops] Spyhop 세션 보드'", "'Spyhop — AI 세션 보드'")
+p = s.replace('<title>[devops] Spyhop 세션 보드</title>', '<title>Spyhop: AI 세션 보드</title>')
+p = p.replace("'[devops] Spyhop 세션 보드'", "'Spyhop: AI 세션 보드'")
 p = re.sub(r'<meta name="share-skeleton[^>]*>\n?', '', p)
 p = p.replace('imwebShareTheme', 'spyhopTheme')
 assert '#team-infra' not in p

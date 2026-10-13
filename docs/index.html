@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Spyhop — AI 세션 보드</title>
+<title>Spyhop: AI 세션 보드</title>
 <style>
 :root{color-scheme:light dark;--bg:#fff;--soft:#f6f7f9;--card:#fff;--ink:#191f28;--ink2:#4e5968;--ink3:#8b95a1;--line:#e9ecef;--blue:#3182f6;--blue-soft:#e8f3ff;--green:#16a37b;--pink:#e5508a;--amber:#e09b16;--violet:#8a63d2;--shadow:0 20px 60px rgba(25,31,40,.10)}
 :root[data-theme="light"]{color-scheme:light;--bg:#fff;--soft:#f6f7f9;--card:#fff;--ink:#191f28;--ink2:#4e5968;--ink3:#8b95a1;--line:#e9ecef;--blue:#3182f6;--blue-soft:#e8f3ff;--green:#16a37b;--pink:#e5508a;--amber:#e09b16;--violet:#8a63d2;--shadow:0 20px 60px rgba(25,31,40,.10)}
@@ -391,7 +391,7 @@ brew install --cask swiftbar &amp;&amp; spyhop</pre>
     var b=document.getElementById('langBtn');if(b)b.textContent=l==='en'?'한국어':'EN';
     var t=document.getElementById('themeBtn'),dk=r.getAttribute('data-theme')==='dark';
     if(t)t.textContent=dk?(l==='en'?'☀︎ Light':'☀︎ 밝게'):(l==='en'?'☾ Dark':'☾ 어둡게');
-    document.title=l==='en'?'Spyhop — every AI session on one board':'Spyhop — AI 세션 보드'};
+    document.title=l==='en'?'Spyhop: every AI session on one board':'Spyhop: AI 세션 보드'};
   applyLang(saved()||(/^ko/i.test(navigator.language||'')?'ko':'en'));
   document.getElementById('langBtn').addEventListener('click',function(){var l=document.documentElement.lang==='en'?'ko':'en';
     try{localStorage.setItem('spyhopLang',l)}catch(e){}applyLang(l)});
