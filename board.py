@@ -3176,11 +3176,11 @@ padding:6px 12px;border-radius:7px;opacity:0;transition:opacity .2s;z-index:20;p
 .card.dragging{opacity:.25}.card.floating{position:fixed;left:0;top:0;z-index:40;margin:0;pointer-events:none;box-shadow:0 14px 34px rgba(15,23,42,.28);will-change:transform}.floating{transform-origin:0 0}.floating.aside{opacity:.92;transition:transform .16s cubic-bezier(.2,.8,.2,1)!important}body.dragging-on{cursor:grabbing;user-select:none}.card.moving{position:relative;opacity:.85}.card.moving:after,#busy{content:"";background:linear-gradient(90deg,var(--wait),var(--wait)) no-repeat,color-mix(in srgb,var(--wait) 18%,transparent);background-size:35% 100%,100% 100%;animation:slide 1.1s cubic-bezier(.4,0,.2,1) infinite}.card.moving:after{position:absolute;left:10px;right:10px;bottom:4px;height:2px;border-radius:2px}@keyframes slide{from{background-position:-60% 0,0 0}to{background-position:160% 0,0 0}}#busy{position:fixed;left:0;right:0;top:0;height:2px;z-index:60;opacity:0;transition:opacity .25s ease;pointer-events:none}#busy.on{opacity:1}.card{position:relative}.col{transition:background-color .15s ease,box-shadow .15s ease}.col.drop{background:color-mix(in srgb,var(--wait) 12%,var(--col));box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--wait) 55%,transparent)}.col.ghost{min-width:0;overflow:hidden;background:transparent;opacity:0;transition:opacity .2s ease,background-color .15s ease,border-color .15s ease}.col.ghost.open{opacity:1}.col.ghost h2{white-space:nowrap;color:var(--ink3)}.slot{margin-top:8px;padding:12px 10px;border:1.5px dashed var(--line);border-radius:8px;font-size:12px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background-color .15s ease,border-color .15s ease,transform .15s ease}.slot.drop{border-color:var(--wait);color:var(--ink);background:color-mix(in srgb,var(--wait) 14%,var(--card));transform:scale(1.03)}main{transition:grid-template-columns .26s cubic-bezier(.2,.8,.2,1)}body.dragging-on .card:not(.dragging):hover{transform:none;box-shadow:none}#dropbar-unused{display:none;position:fixed;left:12px;right:12px;bottom:12px;z-index:25;background:var(--card);border:1px dashed var(--wait);
 border-radius:12px;padding:10px;gap:8px;flex-wrap:wrap;align-items:center;box-shadow:0 6px 24px rgba(60,20,50,.18)}
 #confirm{display:none;position:fixed;inset:0;z-index:30;background:rgba(9,30,66,.5);align-items:center;justify-content:center}
-#confirm.on{display:flex}#mconfirm .cb,#confirm .cb{background:var(--card);border-radius:10px;padding:18px 20px;width:min(420px,90vw)}
-#mconfirm h3,#confirm h3{margin:0 0 6px;font-size:15px}#mconfirm p,#confirm p{margin:0 0 14px;color:var(--ink2);font-size:12.5px}
-#mconfirm .row2,#confirm .row2{display:flex;gap:8px;justify-content:flex-end}
-#mconfirm button,#confirm button{font:600 12.5px -apple-system,sans-serif;border-radius:6px;padding:6px 12px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink)}
-#mconfirm button.danger,#confirm button.danger{background:var(--wait);border-color:var(--wait);color:#fff}#confirm button.danger{background:#d1453b;border-color:#d1453b}
+#confirm.on{display:flex}#confirm .cb{background:var(--card);border-radius:10px;padding:18px 20px;width:min(420px,90vw)}
+#confirm h3{margin:0 0 6px;font-size:15px}#confirm p{margin:0 0 14px;color:var(--ink2);font-size:12.5px}
+#confirm .row2{display:flex;gap:8px;justify-content:flex-end}
+#confirm button{font:600 12.5px -apple-system,sans-serif;border-radius:6px;padding:6px 12px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+#confirm button.danger{background:var(--wait);border-color:var(--wait);color:#fff}#confirm button.danger{background:#d1453b;border-color:#d1453b}
 .end{margin:8px 0 0 6px;font:600 12px -apple-system,sans-serif;color:var(--wait);background:transparent;border:1px solid var(--wait);border-radius:6px;padding:4px 10px;cursor:pointer}
 
 *{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--ink3) 45%,transparent) transparent}
@@ -3216,6 +3216,9 @@ document.addEventListener('click',function(e){var b=e.target.closest&&e.target.c
   if(b.classList.contains('cg'))return go(h);
   if(b.classList.contains('ce')){hovOff();askEnd(h,c)}},true);
 function cancelEnd(){endTarget=null;document.getElementById('confirm').className=''}
+// 종료 확인 창도 다른 창처럼 바깥을 누르거나 Esc 로 닫는다 (뒤에 열린 상세 창은 그대로 둔다)
+document.addEventListener('mousedown',function(e){var f=document.getElementById('confirm');if(f.className==='on'&&e.target===f){e.preventDefault();cancelEnd()}});
+addEventListener('keydown',function(e){if(e.key==='Escape'&&document.getElementById('confirm').className==='on'){e.stopImmediatePropagation();cancelEnd()}},true);
 function doEnd(){var h=endTarget,stop=busy();cancelEnd();
   fetch('http://127.0.0.1:47613/close?k=__TOKEN__',{method:'POST',headers:{'Content-Type':'text/plain'},body:h})
   .then(function(r){return r.text().then(function(t){if(!r.ok)throw t;  // 끝났으면 상세 창과 카드를 바로 치운다
