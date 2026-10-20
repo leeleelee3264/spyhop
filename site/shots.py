@@ -1,65 +1,47 @@
-"""share 페이지용 스크린샷: 레포의 데모 데이터로 그린 화면 + 끌기·서랍·진행 막대·범고래 장면."""
+"""소개 페이지 그림을 데모 데이터로 다시 찍어 assets/ 에 넣는다 (컴퓨터용 png 1600px, 휴대폰용 webp 720px).
+  python3 site/shots.py && python3 site/build.py"""
 import os
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.expanduser('~/workspace/personal/spyhop/tools'))
+from PIL import Image
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 import demo_screens as D  # noqa: E402
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'img')
-os.makedirs(OUT, exist_ok=True)
-D.OUTDIR = OUT
-D.WORKTREES.append(('w4', 'docs-site', 4))  # 세션 없는 워크스페이스 → 서랍에 나온다
-_patch = D.patch
+ASSETS = os.path.join(HERE, 'assets')
+tag = subprocess.run(['git', '-C', HERE, 'describe', '--tags', '--abbrev=0'], capture_output=True, text=True).stdout.strip()
+if tag:
+    D.B.VERSION = tag.lstrip('v')
+FROZEN = ('.orca{animation:none!important;transform:translateY(45%)!important}*{transition:none!important}'
+          '.modal *,.card,.slot{animation:none!important}')
 
 
-def patch(mode):
-    _patch(mode)
-    D.B.cached_summary = lambda log: D.B.summarize(log)
-
-
-D.patch = patch
-
-
-def shot(html, name, w, h, hash_='#x', css='', js=''):
-    page = os.path.join(D.TMP, name + '.html')
-    s = open(html, encoding='utf-8').read().replace('location.reload()', '0').replace("fetch('http://127.0.0.1:47613/gen'", "(function(){return new Promise(function(){})})(''")
-    s = s.replace('</head>', '<style>%s</style></head>' % css)
-    if js:
-        s = s.replace('</body>', '<script>setTimeout(function(){%s},300)</script></body>' % js)
-    open(page, 'w', encoding='utf-8').write(s)
-    out = os.path.join(OUT, name + '.png')
+def shot(html, w, h, out, width, fmt):
+    page = os.path.join(D.TMP, 'shot.html')
+    s = open(html, encoding='utf-8').read().replace('location.reload()', '0').replace(
+        "fetch('http://127.0.0.1:47613/gen'", "(function(){return new Promise(function(){})})(''")
+    open(page, 'w', encoding='utf-8').write(s.replace('</head>', '<style>%s</style></head>' % FROZEN))
+    url = 'file://' + page + '#x'
+    if w < 600:  # 헤드리스 크롬은 아주 좁은 창을 실제보다 넓게 그려서, 휴대폰 폭은 iframe 에 담아 찍는다
+        frame = os.path.join(D.TMP, 'frame.html')
+        open(frame, 'w').write('<html><body style="margin:0"><iframe src="%s" style="width:%dpx;height:%dpx;border:0;display:block">'
+                               '</iframe></body></html>' % (url, w, h))
+        url = 'file://' + frame
+    raw = os.path.join(D.TMP, 'raw.png')
     subprocess.run([D.CHROME, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--window-size=%d,%d' % (w, h),
-                    '--force-device-scale-factor=2', '--virtual-time-budget=3500', '--screenshot=' + out,
-                    'file://' + page + hash_], capture_output=True)
-    print('wrote', out)
+                    '--force-device-scale-factor=2', '--virtual-time-budget=3500', '--screenshot=' + raw, url],
+                   capture_output=True)
+    im = Image.open(raw).convert('RGB')
+    im = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
+    im.save(os.path.join(ASSETS, out), fmt, **({'quality': 82} if fmt == 'WEBP' else {'optimize': True}))
+    print('wrote', out, im.size)
 
 
-FROZEN = '.orca{animation:none!important;transform:translateY(45%)!important}*{transition:none!important}.modal *,.card,.slot{animation:none!important}'
-D.patch('orca')
-D.B.build()
-board = D.B.OUT
-shot(board, 'board', 1280, 600, css=FROZEN)
-first = open(board, encoding='utf-8').read().split('class="modal ', 1)[1].split('id="', 1)[1].split('"', 1)[0]
-shot(board, 'detail', 1280, 680, hash_='#' + first, css=FROZEN)
-shot(board, 'settings', 1280, 980, hash_='#settings', css=FROZEN + '#mcpu,#mmem{visibility:hidden}')
-# 화면이 좁으면 카드가 진행 막대로 줄어든다
-shot(board, 'bars', 1280, 400, css=FROZEN)
-# 끄는 중: 손을 따라오는 카드 + 세션 없는 워크스페이스 서랍
-drag_js = ("var c=document.querySelectorAll('main .card')[0],r=c.getBoundingClientRect();"
-           "startDrag(c,{clientX:r.left+40,clientY:r.top+20},{x:r.left+40,y:r.top+20});drawerAt(20);"
-           "setTimeout(function(){var s=document.querySelector('.drawer .slot');if(!s)return;s.classList.add('drop');var q=s.getBoundingClientRect();"
-           "drag.float.style.transform='translate('+(q.left+120)+'px,'+(q.top+34)+'px) rotate(2deg) scale(1.03)'},600);")
-shot(board, 'drag', 1280, 600, css=FROZEN, js=drag_js)
-# 놓은 직후: 카드는 바로 새 칸에, 아래 막대로 '옮기는 중'
-move_js = ("var c=document.querySelectorAll('main .card')[1],cols=document.querySelectorAll('main .col');"
-           "var to=cols[cols.length-1];to.insertBefore(c,to.querySelector('.more').nextSibling);recount();c.classList.add('moving');"
-           "toast('Moved to infra · still working in ~/payments-api');document.getElementById('toast').className='on';"
-           "toast=function(){};")
-shot(board, 'moving', 1280, 600, css=FROZEN + '#toast{opacity:1!important}', js=move_js)
-# 일을 끝낸 세션 카드 위로 범고래가 고개를 내민다
-peek_js = "peek();"
-shot(board, 'peek', 1280, 600, css=FROZEN, js=peek_js)
-D.patch('ai')
-D.B.build()
-shot(D.B.OUT, 'ai-groups', 1280, 600, css=FROZEN)
+# (그림 이름, 컴퓨터 화면 높이, 휴대폰 화면 높이). 폭은 컴퓨터 1280, 휴대폰 460
+for mode, name, h, mh in (('orca', 'board', 600, 442), ('orca', 'bars', 500, 351), ('ai', 'ai-groups', 600, 442)):
+    D.patch(mode)
+    D.B.build()
+    shot(D.B.OUT, 1280, h, name + '.png', 1600, 'PNG')
+    shot(D.B.OUT, 460, mh, 'm-%s.webp' % name, 720, 'WEBP')
