@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Every AI coding session on one board, each with its own progress.</b><br>
-  <sub>See all your Claude Code and Codex sessions at once, and how far each one has come: done, now, next.</sub>
+  <sub>See all your Claude Code, Codex and OMP sessions at once, and how far each one has come: done, now, next.</sub>
 </p>
 
 <p align="center"><a href="https://leeleelee3264.github.io/spyhop/"><b>Tour the features (intro page with demo video) →</b></a></p>
@@ -16,6 +16,7 @@
   <img alt="Homebrew" src="https://img.shields.io/badge/brew-leeleelee3264%2Ftap-1e293b?logo=homebrew&logoColor=white">
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude%20Code-supported-1e293b">
   <img alt="Codex" src="https://img.shields.io/badge/Codex-supported-1e293b">
+  <img alt="OMP" src="https://img.shields.io/badge/OMP-supported-1e293b">
   <img alt="Orca" src="https://img.shields.io/badge/Orca-optional-1e293b">
   <img alt="Terminals" src="https://img.shields.io/badge/Terminal%20%C2%B7%20iTerm2%20%C2%B7%20Ghostty%20%C2%B7%20WezTerm-supported-1e293b">
 </p>

@@ -171,6 +171,10 @@ FROZEN_ORCAS = ('.orca{animation:none!important;transform:translateY(6%)!importa
 
 def main():
     os.makedirs(OUTDIR, exist_ok=True)
+    # 레포에서 돌리면 제목 옆 버전이 dev 로 찍힌다. 사진에는 마지막 릴리즈 번호를 쓴다
+    tag = subprocess.run(['git', '-C', ROOT, 'describe', '--tags', '--abbrev=0'], capture_output=True, text=True).stdout.strip()
+    if tag:
+        B.VERSION = tag.lstrip('v')
     patch('orca')
     B.build()
     board = B.OUT
