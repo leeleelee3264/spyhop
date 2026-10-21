@@ -3717,14 +3717,14 @@ border-radius:12px;padding:10px;gap:8px;flex-wrap:wrap;align-items:center;box-sh
 
 .ver{position:relative;display:inline-flex;align-items:center;gap:5px;margin-left:8px;font:500 10.5px -apple-system,sans-serif;color:var(--ink3);padding:1px 7px;border-radius:9px;border:1px solid transparent;vertical-align:1px}
 .ver.new{color:var(--ink2);border-color:color-mix(in srgb,var(--wait) 45%,transparent);background:color-mix(in srgb,var(--wait) 8%,transparent);cursor:default}
-.ver .dot{position:relative;width:6px;height:6px;border-radius:50%;background:var(--wait)}
-.ver .dot:after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 4px color-mix(in srgb,var(--wait) 22%,transparent);opacity:0;animation:verglow 2.4s ease-in-out infinite}
-@keyframes verglow{50%{opacity:1}} /* 그림자 대신 투명도를 움직인다: 같은 모양인데 WebKit(맥 앱 창)에서 매 프레임 다시 그리지 않는다 */
+.ver .dot{position:relative;width:6px;height:6px}.ver .dot:after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--wait)}
+.ver .dot:before{content:"";position:absolute;inset:-4px;border-radius:50%;background:color-mix(in srgb,var(--wait) 22%,transparent);transform:scale(.43);animation:verglow 2.4s ease-in-out infinite}
+@keyframes verglow{50%{transform:scale(1)}} /* 그림자 퍼짐 대신 점 뒤 원을 키운다: 같은 모양(0→4px 고리)인데 WebKit(맥 앱 창)에서 매 프레임 다시 그리지 않는다 */
 .vtip{display:none;position:absolute;left:0;top:calc(100% + 8px);z-index:50;white-space:nowrap;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:500 11.5px -apple-system,sans-serif;box-shadow:0 8px 24px rgba(15,23,42,.18)}
 .ver.new:hover .vtip{display:block}.vtip b{font-weight:700}.vtip a{display:block;margin-top:4px;color:var(--wait);text-decoration:none;font-weight:600}
 .vtip:after{content:"";position:absolute;left:0;right:0;top:-9px;height:9px} /* 배지와 말풍선 사이에서도 hover 유지 */
 .vtip:before{content:"";position:absolute;left:14px;top:-5px;width:8px;height:8px;background:var(--card);border-left:1px solid var(--line);border-top:1px solid var(--line);transform:rotate(45deg)}
-@media (prefers-reduced-motion:reduce){.ver .dot:after{animation:none}}
+@media (prefers-reduced-motion:reduce){.ver .dot:before{animation:none}}
 #picker{display:none;position:fixed;inset:0;z-index:45;background:rgba(9,30,66,.5);align-items:center;justify-content:center}
 #picker.on{display:flex}#picker .cb{background:var(--card);border-radius:10px;padding:18px 20px;width:min(420px,90vw)}#picker h3{margin:0 0 4px;font-size:15px}
 #picker .pk-sub{margin:0 0 12px;color:var(--ink3);font-size:12px}#pklist{max-height:50vh;overflow-y:auto;margin-bottom:12px}
