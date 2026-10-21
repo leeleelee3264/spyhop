@@ -110,7 +110,10 @@ enum Board {
         let mod = ((try? FileManager.default.attributesOfItem(atPath: script))?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         // 버전이 다르면(릴리즈 교체) 또는 같은 버전이라도 코드 파일이 서버보다 새것이면(개발 빌드) 바뀐 것이다
         guard moved || running != bundleVersion || mod > started + 1 else { return }
-        guard let args = output("/bin/ps", ["-o", "args=", "-p", String(pid)]), args.contains(path), args.contains("--watch") else { return }
+        // 번호가 다른 프로그램에 다시 쓰였을 수 있어 시작 시각과 실행 인자까지 서버가 남긴 기록과 맞춰 본다(board.py 와 같은 기준)
+        guard let born = startTime(pid), abs(born - started) < 2,
+              let args = output("/bin/ps", ["-o", "args=", "-p", String(pid)])?.trimmingCharacters(in: .whitespacesAndNewlines),
+              args.hasSuffix(path + " --watch") else { return }
         kill(pid, SIGTERM)
         for _ in 0..<50 where kill(pid, 0) == 0 { usleep(100_000) }
         // 헤더 버전 배지가 「vX 에서 업데이트됨」을 보이게 brew 업그레이드 때와 같은 기록을 남긴다
@@ -137,9 +140,25 @@ enum Board {
         // OMP 는 상태 확장이 남긴 파일로 안다
         let dir = home + "/omp"
         for f in (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [] where f.hasSuffix(".json") {
-            if let pid = Int32((f as NSString).deletingPathExtension), kill(pid, 0) == 0 { return true }
+            // 서버(omp_sessions·agent_pids)와 같은 기준: 형식이 맞고, 그 번호의 프로그램이 기록된 시각에 시작했을 때만
+            guard let d = FileManager.default.contents(atPath: dir + "/" + f),
+                  let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let pid = j["pid"] as? Int, pid > 0, let start = j["start"] as? Double,
+                  j["busy"] is Bool, j["cwd"] is String, j["sid"] is String,
+                  let born = startTime(pid_t(pid)), abs(born - start) < 5 else { continue }
+            return true
         }
         return false
+    }
+
+    /// 그 번호 프로그램이 시작한 시각(epoch 초). 없으면 nil
+    static func startTime(_ pid: pid_t) -> Double? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let t = info.kp_proc.p_un.__p_starttime
+        return Double(t.tv_sec) + Double(t.tv_usec) / 1_000_000
     }
 
     struct State {
