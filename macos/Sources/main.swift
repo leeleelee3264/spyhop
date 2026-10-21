@@ -82,6 +82,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // 창이 다른 앱·다른 데스크톱에 완전히 가려지면 웹 화면을 숨겨 쉬게 한다. 브라우저가 가려진 탭을 멈추는 것과 같게
+    // (그대로 두면 WebKit 이 가려진 채로 계속 그린다. 실측 CPU 30%대 → 1% 아래)
+    func windowDidChangeOcclusionState(_ n: Notification) {
+        guard let w = n.object as? NSWindow, w === window else { return }
+        boardView?.isHidden = !w.occlusionState.contains(.visible)
+    }
+
     func windowWillClose(_ n: Notification) {
         guard let w = n.object as? NSWindow, w === window else { return }
         // 닫기가 끝난 뒤에 웹 화면과 창을 놓는다(닫는 도중에 창을 놓으면 빈 창이 화면에 남는다. 실제로 겪음)
