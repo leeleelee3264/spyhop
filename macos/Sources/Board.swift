@@ -99,7 +99,7 @@ enum Board {
         let parts = rec.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", omittingEmptySubsequences: false)
         guard parts.count >= 3, let pid = Int32(parts[0]), let started = Double(parts[parts.count - 1]), started > 0 else { return }
         let path = parts[1..<(parts.count - 1)].joined(separator: " ")
-        let ours = (script as NSString).resolvingSymlinksInPath
+        let ours = realPath(script)  // board.py 의 os.path.realpath 와 같게(NSString 쪽은 /private 를 떼어 버린다)
         // 앱을 다른 자리로 옮겼으면(옛 자리에 코드가 없음) 그 서버를 넘겨받는다. 다른 자리에 앱이 따로 남아 있거나 brew 설치본이면 건드리지 않는다
         let moved = path != ours && path.hasSuffix(".app/Contents/Resources/spyhop/board.py") && !FileManager.default.fileExists(atPath: path)
         guard path == ours || moved else { return }
@@ -113,7 +113,8 @@ enum Board {
         // 번호가 다른 프로그램에 다시 쓰였을 수 있어 시작 시각과 실행 인자까지 서버가 남긴 기록과 맞춰 본다(board.py 와 같은 기준)
         guard let born = startTime(pid), abs(born - started) < 2,
               let args = output("/bin/ps", ["-o", "args=", "-p", String(pid)])?.trimmingCharacters(in: .whitespacesAndNewlines),
-              args.hasSuffix(path + " --watch") else { return }
+              args.hasSuffix(" --watch"), let at = args.range(of: " /"),
+              realPath(String(args[at.upperBound...].dropLast(" --watch".count))) == path || args.hasSuffix(path + " --watch") else { return }
         kill(pid, SIGTERM)
         for _ in 0..<50 where kill(pid, 0) == 0 { usleep(100_000) }
         // 헤더 버전 배지가 「vX 에서 업데이트됨」을 보이게 brew 업그레이드 때와 같은 기록을 남긴다
@@ -143,12 +144,19 @@ enum Board {
             // 서버(omp_sessions·agent_pids)와 같은 기준: 형식이 맞고, 그 번호의 프로그램이 기록된 시각에 시작했을 때만
             guard let d = FileManager.default.contents(atPath: dir + "/" + f),
                   let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-                  let pid = j["pid"] as? Int, pid > 0, let start = j["start"] as? Double,
+                  let n = j["pid"] as? Int, let pid = Int32(exactly: n), pid > 0, let start = j["start"] as? Double,
                   j["busy"] is Bool, j["cwd"] is String, j["sid"] is String,
-                  let born = startTime(pid_t(pid)), abs(born - start) < 5 else { continue }
+                  let born = startTime(pid), abs(born - start) < 5 else { continue }
             return true
         }
         return false
+    }
+
+    /// 링크를 모두 푼 진짜 경로(없는 파일이면 그대로)
+    static func realPath(_ p: String) -> String {
+        guard let r = realpath(p, nil) else { return p }
+        defer { free(r) }
+        return String(cString: r)
     }
 
     /// 그 번호 프로그램이 시작한 시각(epoch 초). 없으면 nil
