@@ -101,7 +101,9 @@ class BoardUITest(unittest.TestCase):
 
     def test_version_tooltip_gap_remains_inside_badge_hit_area(self):
         result = self.browser('assigned', '''
-            const badge=document.getElementById('ver');badge.className='ver new';
+            // 앱 보드는 새 버전 알림이 있을 때만 제목 옆에 배지를 그린다. 없으면 그 자리에 붙여서 잰다
+            let badge=document.getElementById('ver');if(!badge){badge=document.createElement('span');badge.id='ver';document.querySelector('.subbar h1').after(badge)}
+            badge.className='ver new';
             badge.innerHTML='v0.6.0<span class="vtip"><b>Updated</b> from v0.5.0<a href="#">Release notes</a></span>';
             const tip=badge.querySelector('.vtip');tip.style.display='block';
             const b=badge.getBoundingClientRect(),t=tip.getBoundingClientRect();

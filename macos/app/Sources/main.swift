@@ -63,12 +63,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         NSApp.setActivationPolicy(.regular)  // 창이 있을 때만 Dock·Cmd-Tab 에 보인다
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
-                             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
             w.title = "Spyhop"
+            // 제목줄을 따로 두지 않고 보드 헤더가 창 맨 위에 온다. 빈 도구 막대로 제목줄 높이를 헤더와 맞춰 신호등이 헤더 가운데에 오게 한다
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
+            w.toolbar = NSToolbar(identifier: "board")
+            w.toolbarStyle = .unified
             w.isReleasedWhenClosed = false
             w.delegate = self
             w.minSize = NSSize(width: 420, height: 320)
-            let v = WebHost.shared.makeWebView(frame: w.contentView!.bounds)
+            let v = WebHost.shared.makeWebView(frame: w.contentView!.bounds, board: true)
             v.autoresizingMask = [.width, .height]
             w.contentView!.addSubview(v)
             let z = UserDefaults.standard.double(forKey: Self.zoomKey)
@@ -87,6 +92,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     func windowDidChangeOcclusionState(_ n: Notification) {
         guard let w = n.object as? NSWindow, w === window else { return }
         boardView?.isHidden = !w.occlusionState.contains(.visible)
+    }
+
+    // 전체 화면에서는 빈 도구 막대가 회색 띠로 헤더(탭·정렬·설정)를 덮는다. 그동안만 숨긴다
+    func windowWillEnterFullScreen(_ n: Notification) {
+        guard let w = n.object as? NSWindow, w === window else { return }
+        w.toolbar?.isVisible = false
+    }
+
+    func windowDidExitFullScreen(_ n: Notification) {
+        guard let w = n.object as? NSWindow, w === window else { return }
+        w.toolbar?.isVisible = true
     }
 
     func windowWillClose(_ n: Notification) {

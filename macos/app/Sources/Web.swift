@@ -12,15 +12,17 @@ final class WebHost: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessa
     Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:function(t){h.postMessage(String(t));return Promise.resolve()}}})}catch(e){}})();
     """
 
-    func makeWebView(frame: NSRect) -> WKWebView {
+    /// board 가 true 면 보드 창용: 제목줄 없이 헤더가 창 맨 위로 올라가므로, 헤더 빈 곳을 끌면 창이 움직이게 한다
+    func makeWebView(frame: NSRect, board: Bool = false) -> WKWebView {
         let cfg = WKWebViewConfiguration()
         let ucc = WKUserContentController()
         ucc.addUserScript(WKUserScript(source: Self.clipboardJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         ucc.add(WeakHandler(self), name: "spyhopCopy")
+        if board { ucc.add(WeakHandler(self), name: "spyhopChrome") }
         cfg.userContentController = ucc
         // 로더(file://)가 보드(http://127.0.0.1)를 iframe 으로 부르고, 꺼지면 다시 붙을 때까지 기다린다
         cfg.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
-        let v = WKWebView(frame: frame, configuration: cfg)
+        let v: WKWebView = board ? BoardWebView(frame: frame, configuration: cfg) : WKWebView(frame: frame, configuration: cfg)
         v.uiDelegate = self
         v.navigationDelegate = self
         v.setValue(false, forKey: "drawsBackground")
@@ -54,8 +56,14 @@ final class WebHost: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessa
 
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
         let o = m.frameInfo.securityOrigin
-        guard m.name == "spyhopCopy", let t = m.body as? String,
-              o.protocol == "file" || (o.host == "127.0.0.1" && o.port == Int(Board.port)) else { return }
+        guard o.protocol == "file" || (o.host == "127.0.0.1" && o.port == Int(Board.port)) else { return }
+        if m.name == "spyhopChrome", let v = m.webView as? BoardWebView, let d = m.body as? [String: Any] {
+            v.headerBottom = (d["bottom"] as? NSNumber)?.doubleValue ?? 0
+            v.hits = ((d["hit"] as? [[NSNumber]]) ?? []).compactMap { r in
+                r.count == 4 ? CGRect(x: r[0].doubleValue, y: r[1].doubleValue, width: r[2].doubleValue, height: r[3].doubleValue) : nil }
+            return
+        }
+        guard m.name == "spyhopCopy", let t = m.body as? String else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(t, forType: .string)
     }
@@ -133,3 +141,37 @@ final class WeakHandler: NSObject, WKScriptMessageHandler {
         target?.userContentController(c, didReceive: m)
     }
 }
+
+/// 보드 창의 웹 화면. 헤더에서 버튼·탭이 아닌 빈 곳을 누르면 웹 대신 창이 받아 끌기·두 번 눌러 확대를 한다(맥 제목줄처럼)
+final class BoardWebView: WKWebView {
+    var headerBottom = 0.0   // 헤더 아래 끝(CSS 픽셀, 위에서부터)
+    var hits: [CGRect] = []  // 헤더 안 누를 수 있는 것들의 자리(CSS 픽셀)
+
+    /// 헤더의 빈 곳(창을 끄는 자리)인가
+    private func inDragArea(_ e: NSEvent) -> Bool {
+        let p = convert(e.locationInWindow, from: nil)
+        let z = pageZoom > 0 ? pageZoom : 1
+        let pt = CGPoint(x: p.x / z, y: (isFlipped ? p.y : bounds.height - p.y) / z)
+        return pt.y < headerBottom && !hits.contains(where: { $0.insetBy(dx: -2, dy: -2).contains(pt) })
+    }
+
+    // 다른 앱이 앞에 있어도 제목줄처럼 첫 클릭으로 바로 끌 수 있게
+    override func acceptsFirstMouse(for e: NSEvent?) -> Bool {
+        if let e, inDragArea(e) { return true }
+        return super.acceptsFirstMouse(for: e)
+    }
+
+    override func mouseDown(with e: NSEvent) {
+        guard let w = window, inDragArea(e) else { return super.mouseDown(with: e) }
+        if e.clickCount == 2 {
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+            case "Minimize": w.performMiniaturize(nil)
+            case "None": break
+            default: w.performZoom(nil)
+            }
+        } else {
+            w.performDrag(with: e)
+        }
+    }
+}
+
