@@ -65,11 +65,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
             w.title = "Spyhop"
-            // 제목줄을 따로 두지 않고 보드 헤더가 창 맨 위에 온다. 빈 도구 막대로 제목줄 높이를 헤더와 맞춰 신호등이 헤더 가운데에 오게 한다
+            // 제목줄을 따로 두지 않고 보드 헤더가 창 맨 위에 온다. 빈 도구 막대(작은 높이)로 신호등을 헤더 가운데에 맞춘다.
+            // 큰 도구 막대(.unified)는 macOS 26 에서 헤더 둘레에 유리 테두리와 빈 알약을 그려서 쓰지 않는다
             w.titleVisibility = .hidden
             w.titlebarAppearsTransparent = true
             w.toolbar = NSToolbar(identifier: "board")
-            w.toolbarStyle = .unified
+            w.toolbarStyle = .unifiedCompact
+            w.titlebarSeparatorStyle = .none
             w.isReleasedWhenClosed = false
             w.delegate = self
             w.minSize = NSSize(width: 420, height: 320)
