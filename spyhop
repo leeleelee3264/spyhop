@@ -12,6 +12,15 @@ loader="file://$home/open.html"
 
 if [ "${1:-}" = doctor ]; then shift; exec python3 "$d/board.py" --doctor "$@"; fi
 
+# Spyhop.app 이 깔려 있으면 서버·보드·메뉴바는 앱이 맡는다 (브라우저·오르카 탭·SwiftBar 를 쓰지 않는다).
+# 서버도 앱이 띄우게 둔다: 여기서 띄우면 앱 안의 서버를 내리고 이 설치본의 서버로 바꿔 버린다
+for app in /Applications/Spyhop.app "$HOME/Applications/Spyhop.app"; do
+  if [ -d "$app" ] && open -a "$app"; then
+    echo "opened: $app"
+    exit 0
+  fi
+done
+
 python3 "$d/board.py" --ensure >/dev/null
 
 # 메뉴바: SwiftBar 가 깔려 있으면 플러그인을 알아서 붙인다 (brew 업그레이드에도 안 깨지게 opt 경로로)

@@ -47,6 +47,18 @@ You need macOS, Homebrew, and a logged-in `claude` or `codex` CLI (Spyhop uses i
 4. Click a card to see every step, the last reply and its TODO list. **Go to session** jumps to that pane or tab.
 5. Optional, menu bar: `brew install --cask swiftbar`, then run `spyhop` once more. The orca icon shows how many sessions are waiting for you.
 
+### Or use the Mac app (beta)
+
+Spyhop.app shows the same board in its own window, with the orca in the menu bar built in. No browser tab, no SwiftBar.
+
+1. Download `Spyhop-<version>.dmg` from [Releases](https://github.com/leeleelee3264/spyhop/releases) and drag Spyhop into Applications.
+2. Open it. The app is not signed with an Apple Developer ID, so macOS blocks the first open: go to **System Settings → Privacy & Security** and click **Open Anyway** once.
+3. It needs the Xcode Command Line Tools for Python (`xcode-select --install`), and a logged-in `claude` or `codex` CLI as above.
+
+The app runs the same board server, so sessions, summaries and settings are the same. Closing the window keeps the orca in the menu bar; **Start at login** opens the app there too. If the brew version is also installed, `spyhop` opens the app. The app takes over the menu bar from SwiftBar, so you can quit SwiftBar if you only used it for Spyhop.
+
+To update, quit the app, replace it in Applications with the new one and open it. It restarts the board on the new version.
+
 ## How to
 
 ### Update
@@ -90,6 +102,8 @@ Turn off **Start at login** in Settings first, and remove the **.spyhop** projec
 brew uninstall spyhop && rm -rf ~/.spyhop
 ```
 
+For the Mac app, turn off **Start at login** in Settings first, quit it from the orca menu (right-click), then delete it from Applications.
+
 ## Reference
 
 ### Commands
@@ -121,7 +135,7 @@ brew uninstall spyhop && rm -rf ~/.spyhop
 - **Filter and sort**: All / My turn / Working tabs with counts, and a Sort menu (Newest or Longest wait). Both choices are remembered.
 - **Narrow windows**: columns wrap onto the next row (3 across in a 900px window, 1 on a phone).
 - **Settings**: summarizer, group by (Location or AI topics), 9 themes, start at login, update interval, live CPU and memory.
-- **Menu bar**: how many sessions are waiting for you; click a row to jump there.
+- **Menu bar**: how many sessions are waiting for you; click a row to jump there. Built into the Mac app, or through SwiftBar with the brew version.
 
 ### OMP
 

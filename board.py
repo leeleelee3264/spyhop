@@ -2399,7 +2399,10 @@ def _build():
     os.replace(OUT + '.%d.tmp' % os.getpid(), OUT)
     infos = sorted((t['_info'] for t in terms if t.get('_info')), key=lambda i: (i['ws'], i['order']))
     check_board(terms)
-    save_json(STATE, {'at': time.time(), 'sessions': infos})
+    t = current_theme()
+    # version: 앱이 업데이트 뒤 「어디서 올라왔는지」를 적을 때, appearance: 앱 창 제목줄을 테마 밝기에 맞출 때 쓴다
+    save_json(STATE, {'at': time.time(), 'version': VERSION, 'appearance': 'dark' if t in DARK_THEMES else 'system' if t == 'classic' else 'light',
+                      'sessions': infos})
     try:  # 진단 기록은 보드와 상태를 다 쓴 뒤에 남긴다. 여기서 실패해도 보드는 그대로 간다
         save_json(TRACE, {'at': time.time(), 'code': trace['code'], 'inputs': trace['inputs'], 'panes': [x['_tr'] for x in trace['raw']]})
     except Exception as e:
@@ -2563,8 +2566,34 @@ PORT = 47613
 CODE_STAMP = str(int(os.path.getmtime(os.path.abspath(__file__))))
 # 이 보드가 뜰 때의 진짜 코드 위치. 로그인 자동 시작은 opt 링크로 띄워서, brew upgrade 뒤에 다시 풀면 새 버전을 가리킨다
 ME = os.path.realpath(__file__)
-_V = re.search(r'/Cellar/spyhop/([^/]+)/', ME)
-VERSION = _V.group(1) if _V else 'dev'  # brew 설치본은 폴더 이름이 곧 버전. 레포에서 돌리면 dev  # 보드 코드가 바뀌면 열린 페이지가 알아서 새로 읽게 (화면 코드는 갱신만으론 안 바뀐다)
+
+
+def version_of(path):
+    """코드 위치로 버전을 안다. brew 설치본은 Cellar 폴더 이름, Spyhop.app 안의 코드는 앱의 Info.plist. 둘 다 아니면 None"""
+    m = re.search(r'/Cellar/spyhop/([^/]+)/', path or '')
+    if m:
+        return m.group(1)
+    m = re.match(r'(.*\.app)/Contents/Resources/spyhop/', path or '')
+    if m:
+        try:
+            import plistlib
+            with open(m.group(1) + '/Contents/Info.plist', 'rb') as f:
+                return plistlib.load(f).get('CFBundleShortVersionString') or None
+        except (OSError, ValueError):
+            return None
+    return None
+
+
+def install_kind(path):
+    """'brew' / 'app'(Spyhop.app 안) / 'dev'(레포 등)"""
+    if '/Cellar/spyhop/' in (path or ''):
+        return 'brew'
+    if re.search(r'\.app/Contents/Resources/spyhop/', path or ''):
+        return 'app'
+    return 'dev'
+
+
+VERSION = version_of(ME) or 'dev'  # 레포에서 돌리면 dev  # 보드 코드가 바뀌면 열린 페이지가 알아서 새로 읽게 (화면 코드는 갱신만으론 안 바뀐다)
 SEA = '<div class="sea" aria-hidden="true"></div><script>window.ORCA="<svg xmlns=\\"http://www.w3.org/2000/svg\\" viewBox=\\"0 0 36 64\\" width=\\"100%\\" height=\\"100%\\" aria-hidden=\\"true\\"><g stroke=\\"currentColor\\" stroke-width=\\".7\\" stroke-linejoin=\\"round\\"><path fill=\\"#10131a\\" d=\\"M22 3C28 3 30 9 29 17L28 36C28 47 25 55 21 59L28 62L19 61L11 63L16 57C10 48 7 37 8 24C8 13 12 6 18 4Q20 3 22 3Z\\"/><path fill=\\"#fff\\" stroke=\\"none\\" d=\\"M28 10Q30 14 28 23L26 39Q22 42 21 35L23 23Q27 18 28 10Z\\"/><path fill=\\"#fff\\" stroke=\\"none\\" d=\\"M15 12C12 13 12 17 15 18C18 19 21 16 21 13C20 11 17 11 15 12Z\\"/><path fill=\\"#9299a5\\" stroke=\\"none\\" d=\\"M9 40Q13 36 16 40L15 46Q11 44 9 40Z\\"/><path fill=\\"#10131a\\" d=\\"M24 29Q32 33 32 40Q27 39 22 33Z\\"/><path fill=\\"none\\" d=\\"M25 10Q27 11 29 10\\"/><circle cx=\\"24\\" cy=\\"16\\" r=\\".8\\" fill=\\"#10131a\\" stroke=\\"none\\"/></g></svg>";(function(){var sea=document.querySelector(".sea");if(!sea)return;function fitSea(){var h=sea.parentNode.getBoundingClientRect(),a=document.querySelector(".brand").getBoundingClientRect().right-h.left+16,b=h.right-document.querySelector(".tiles").getBoundingClientRect().left+16;sea.style.left=a+"px";sea.style.right=b+"px"}fitSea();addEventListener("resize",fitSea);function pop(){var o=document.createElement("div");o.className="orca";o.innerHTML=window.ORCA;var w=sea.getBoundingClientRect().width-30;if(w<=0)return;o.style.left=(Math.random()*w)+"px";sea.appendChild(o);setTimeout(function(){o.remove()},3200)}setTimeout(pop,400)})()</script>'  # 열 때 한 번 헤더에서, 그 뒤엔 세션이 일을 끝낼 때만 그 카드 위로 범고래가 수직으로 고개를 내밀어 둘러본다(spyhop)
 PANEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'panel.html')
 
@@ -2926,12 +2955,23 @@ def claude_pid(session_id):
     return None
 
 
+def read_pidfile(pidfile=None):
+    """「pid 경로 시작시각」(옛 기록은 「pid 경로」). 경로에 빈칸이 있을 수 있어 앞뒤 칸으로 자른다"""
+    with open(pidfile or PIDFILE) as f:
+        parts = f.read().split(' ')
+    parts = [p.strip() for p in parts]
+    if len(parts) >= 3:
+        try:
+            return int(parts[0]), ' '.join(parts[1:-1]), float(parts[-1])
+        except ValueError:
+            pass
+    return int(parts[0]), ' '.join(parts[1:]), None
+
+
 def watcher_record(pidfile=None):
     """PID 번호만 믿지 않고 실행 파일·감시 인자·시작 시각을 확인한다. 옛 두 칸 기록도 읽는다."""
     try:
-        with open(pidfile or PIDFILE) as f:
-            parts = f.read().split()
-        pid, path = int(parts[0]), parts[1]
+        pid, path, start_rec = read_pidfile(pidfile)
         if pid <= 0 or os.path.basename(path) != 'board.py':
             return None
         p = subprocess.run(['ps', '-p', str(pid), '-o', 'lstart=,comm='],
@@ -2939,17 +2979,19 @@ def watcher_record(pidfile=None):
         if len(p) != 6 or not os.path.basename(p[5].strip()).lower().startswith('python'):
             return None
         start = _ps_start(p[:5])
-        if not start or len(parts) > 2 and float(parts[2]) != start:
+        if not start or start_rec is not None and start_rec != start:
             return None
         args = subprocess.run(['ps', '-p', str(pid), '-o', 'args='],
                               capture_output=True, text=True, timeout=5).stdout.strip()
-        argv = args.rsplit(None, 2)
-        if len(argv) != 3 or argv[-1] != '--watch':
+        if not args.endswith(' --watch'):
             return None
+        head = args[:-len(' --watch')]
         # brew가 opt 링크를 바꿔도 기존 감시의 실행 인자는 여전히 opt 경로다.
         opt_path = re.sub(r'/Cellar/spyhop/[^/]+/', '/opt/spyhop/', path)
-        if (os.path.realpath(argv[-2]) != os.path.realpath(path)
-                and (opt_path == path or os.path.normpath(argv[-2]) != opt_path)):
+        if head.endswith(' ' + path) or opt_path != path and head.endswith(' ' + opt_path):
+            return pid, path, start
+        argv = head.rsplit(None, 1)
+        if len(argv) != 2 or os.path.realpath(argv[-1]) != os.path.realpath(path):
             return None
         return pid, path, start
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
@@ -2965,10 +3007,10 @@ UPDATE_FILE = os.path.expanduser('~/.spyhop/update.json')  # 마지막 업데이
 
 def note_update(old_path):
     """옛 버전 보드를 새 버전으로 바꿀 때 한 번 적는다. 헤더 버전 배지가 이걸 보고 반짝인다."""
-    m = re.search(r'/Cellar/spyhop/([^/]+)/', old_path or '')
-    if not m or VERSION == 'dev' or m.group(1) == VERSION:
+    old = version_of(old_path)
+    if not old or VERSION == 'dev' or old == VERSION:
         return
-    save_json(UPDATE_FILE, {'from': m.group(1), 'to': VERSION, 'at': time.time(), 'seen': False})
+    save_json(UPDATE_FILE, {'from': old, 'to': VERSION, 'at': time.time(), 'seen': False})
 
 
 def load_update():
@@ -3033,6 +3075,8 @@ def stop_if_outdated():
     pid, running, _ = record
     if running == ME:
         return
+    if {install_kind(running), install_kind(ME)} == {'brew', 'app'}:  # brew 설치본과 Spyhop.app 은 서로의 서버를 내리지 않는다
+        return
     if watcher_record() != record:  # 확인 사이에 PID가 재사용됐으면 신호를 보내지 않는다
         return
     try:
@@ -3077,6 +3121,7 @@ def write_loader():
 
 
 PLIST = os.path.expanduser('~/Library/LaunchAgents/com.spyhop.board.plist')
+APP_PLIST = os.path.expanduser('~/Library/LaunchAgents/com.spyhop.app.plist')  # Spyhop.app 이 만드는, 앱을 메뉴바로 여는 로그인 항목
 # brew 로 깔면 버전마다 폴더가 바뀐다(Cellar/spyhop/<버전>). 로그인 자동 시작에는 늘 같은 opt 경로를 남긴다
 HERE = re.sub(r'/Cellar/spyhop/[^/]+', '/opt/spyhop', os.path.dirname(os.path.abspath(__file__)))
 
@@ -3088,8 +3133,9 @@ def autostart_on():
 def set_autostart(on):
     """맥 로그인 때 보드를 켜는 LaunchAgent 를 등록/해제한다. 끌 때는 파일만 지워서 지금 돌고 있는 보드는 살려 둔다."""
     if not on:
-        if os.path.exists(PLIST):
-            os.remove(PLIST)
+        for p in (PLIST, APP_PLIST):
+            if os.path.exists(p):
+                os.remove(p)
         return
     path = os.pathsep.join(['/usr/local/bin', '/opt/homebrew/bin', os.path.expanduser('~/.local/bin'), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])
     os.makedirs(os.path.dirname(PLIST), exist_ok=True)
@@ -3108,9 +3154,20 @@ def set_autostart(on):
     subprocess.run(['launchctl', 'bootstrap', 'gui/' + uid, PLIST], capture_output=True)  # 이미 보드가 돌고 있으면 새로 뜬 쪽은 바로 끝난다
 
 
+def installed_app():
+    """응용 프로그램 폴더에 깔린 Spyhop.app 경로, 없으면 None"""
+    for d in ('/Applications', os.path.expanduser('~/Applications')):
+        p = os.path.join(d, 'Spyhop.app')
+        if os.path.isdir(p):
+            return p
+    return None
+
+
 def open_board():
-    """메뉴바의 'Open full board': 기본 브라우저로 보드를 연다."""
-    subprocess.run(['open', 'http://127.0.0.1:%d/' % PORT])
+    """메뉴바의 'Open full board': Spyhop.app 이 깔려 있으면 앱 창으로, 없으면 기본 브라우저로 보드를 연다."""
+    app = installed_app()
+    if not app or subprocess.run(['open', '-a', app], capture_output=True).returncode != 0:
+        subprocess.run(['open', 'http://127.0.0.1:%d/' % PORT])
 
 
 def watch():
@@ -3224,8 +3281,10 @@ def _doctor_get(path, timeout=3):
 
 
 def _where(path):
-    m = re.search(r'/Cellar/spyhop/([^/]+)/', path or '')
-    return ('brew %s' % m.group(1)) if m else (path.replace(os.path.expanduser('~'), '~') if path else '?')
+    kind = install_kind(path)
+    if kind in ('brew', 'app') and version_of(path):
+        return '%s %s' % (kind, version_of(path))
+    return path.replace(os.path.expanduser('~'), '~') if path else '?'
 
 
 def doctor(argv):
@@ -3239,9 +3298,7 @@ def doctor(argv):
     # 1) 보드가 도는가, 어떤 코드로
     pid, running = None, ''
     try:
-        with open(PIDFILE) as f:
-            parts = f.read().split()
-        pid, running = int(parts[0]), (parts[1] if len(parts) > 1 else '')
+        pid, running, _ = read_pidfile()
         os.kill(pid, 0)
         alive = True
     except (OSError, ValueError, IndexError):
@@ -3251,7 +3308,7 @@ def doctor(argv):
     else:
         same = running == me
         say('  board:         running (pid %d) from %s%s' % (pid, _where(running),
-            '' if same else '  <-- DIFFERENT CODE than this doctor. Run: spyhop  (restarts it on this version)'))
+            '' if same else '  <-- DIFFERENT CODE than this doctor. Run: spyhop  (restarts it on this version; with Spyhop.app, quit and reopen the app)'))
     st = _doctor_get('/state.json')
     if isinstance(st, Exception):
         say('  board web:     not reachable on 127.0.0.1:%d (%s)' % (PORT, type(st).__name__))

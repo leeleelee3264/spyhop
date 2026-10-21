@@ -50,6 +50,16 @@ class WatcherIdentityTest(unittest.TestCase):
         self.assertEqual(record[0], p.pid)
         self.assertTrue(B.watching())
 
+    def test_path_with_spaces_is_recognized(self):
+        spaced = self.root / 'My Apps' / 'Spyhop 2.app' / 'board.py'
+        spaced.parent.mkdir(parents=True)
+        spaced.write_text(self.script.read_text())
+        self.script = spaced
+        p, record = self.start()
+        self.assertIsNotNone(record)
+        self.pidfile.write_text('%d %s %s' % (p.pid, spaced, record[2]))
+        self.assertEqual(B.watcher_record()[1], str(spaced))
+
     def test_matching_birth_is_recognized_but_reused_birth_is_not(self):
         p, record = self.start()
         self.assertIsNotNone(record)
@@ -126,6 +136,17 @@ class WatcherIdentityTest(unittest.TestCase):
         threading.Thread(target=p.wait, daemon=True).start()
         B.stop_if_outdated()
         self.assertEqual(p.wait(timeout=5), -15)
+
+    def test_brew_and_app_do_not_stop_each_other(self):
+        app = self.root / 'Spyhop.app/Contents/Resources/spyhop/board.py'
+        app.parent.mkdir(parents=True)
+        app.write_text(self.script.read_text())
+        self.script = app
+        p, record = self.start()
+        self.assertIsNotNone(record)
+        with patch.object(B, 'ME', '/opt/homebrew/Cellar/spyhop/9.9.9/libexec/board.py'):
+            B.stop_if_outdated()
+        self.assertIsNone(p.poll())
 
     def test_missing_and_invalid_records_are_ignored(self):
         self.assertFalse(B.watching())

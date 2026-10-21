@@ -1,0 +1,46 @@
+name: macOS app
+
+# PR 에서는 앱이 빌드되는지만 보고, 릴리즈를 내면 DMG 를 만들어 그 릴리즈에 붙인다
+on:
+  pull_request:
+    paths: ['macos/**', 'board.py', 'panel.html', 'orca_art.py', '.github/workflows/macos-app.yml']
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: macos/build.sh --dmg
+      - name: Check the bundle
+        run: |
+          plutil -lint macos/build/Spyhop.app/Contents/Info.plist
+          lipo -archs macos/build/Spyhop.app/Contents/MacOS/Spyhop
+          codesign --verify macos/build/Spyhop.app
+          test -f macos/build/Spyhop.app/Contents/Resources/spyhop/board.py
+
+  release:
+    if: github.event_name == 'release'
+    runs-on: macos-14
+    permissions:
+      contents: write  # 릴리즈에 DMG 를 붙이는 데만 쓴다
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: SPYHOP_VERSION="${TAG#v}" macos/build.sh --dmg
+      - name: Attach the DMG to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" macos/build/Spyhop-*.dmg --clobber
