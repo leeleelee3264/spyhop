@@ -15,7 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import board as B  # noqa: E402
 
-OUTDIR = os.path.join(ROOT, 'docs', 'screenshots')
+OUTDIR = os.path.join(ROOT, '..', '..', 'docs', 'screenshots')  # 레포 맨 위 docs
 TMP = tempfile.mkdtemp(prefix='spyhop-demo-')
 CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 NOW = time.time()

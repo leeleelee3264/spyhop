@@ -13,17 +13,17 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/spyhop"
 
 for arch in arm64 x86_64; do
-  swiftc -O -target "$arch-apple-macos13.0" macos/Sources/*.swift -o "$out/Spyhop-$arch"
+  swiftc -O -target "$arch-apple-macos13.0" macos/app/Sources/*.swift -o "$out/Spyhop-$arch"
 done
 lipo -create "$out/Spyhop-arm64" "$out/Spyhop-x86_64" -output "$app/Contents/MacOS/Spyhop"
 rm -f "$out/Spyhop-arm64" "$out/Spyhop-x86_64"
 
-# 보드 서버와 화면은 그대로 쓴다
-cp board.py orca_art.py panel.html LICENSE "$app/Contents/Resources/spyhop/"
-cp macos/Resources/AppIcon.icns macos/Resources/MenuBarIcon.png "$app/Contents/Resources/"
+# 보드 서버와 화면(앱 전용 사본, macos/board)
+cp macos/board/board.py macos/board/orca_art.py macos/board/panel.html LICENSE "$app/Contents/Resources/spyhop/"
+cp macos/app/Resources/AppIcon.icns macos/app/Resources/MenuBarIcon.png "$app/Contents/Resources/"
 # 창이 여는 로더: 오르카 탭이 쓰는 것과 같은 페이지(board.py 의 LOADER_HTML)
-/usr/bin/python3 -B -c 'import sys; sys.path.insert(0, "."); import board; sys.stdout.write(board.LOADER_HTML)' > "$app/Contents/Resources/loader.html"
-sed "s/__VERSION__/$ver/g" macos/Info.plist > "$app/Contents/Info.plist"
+/usr/bin/python3 -B -c 'import sys; sys.path.insert(0, "macos/board"); import board; sys.stdout.write(board.LOADER_HTML)' > "$app/Contents/Resources/loader.html"
+sed "s/__VERSION__/$ver/g" macos/app/Info.plist > "$app/Contents/Info.plist"
 
 codesign --force --sign - "$app"
 echo "built: $app ($ver)"

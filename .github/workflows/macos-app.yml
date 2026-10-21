@@ -3,7 +3,7 @@ name: macOS app
 # PR 에서는 앱이 빌드되는지만 보고, 릴리즈를 내면 DMG 를 만들어 그 릴리즈에 붙인다
 on:
   pull_request:
-    paths: ['macos/**', 'board.py', 'panel.html', 'orca_art.py', 'spyhop', 'tests/**', '.github/workflows/macos-app.yml']
+    paths: ['macos/**', 'LICENSE', '.github/workflows/macos-app.yml']
   release:
     types: [published]
 
@@ -20,7 +20,7 @@ jobs:
           fetch-depth: 0
       - name: Tests
         # 브라우저 화면(test_board_ui)·동시 요청(test_robustness)·데모 화면(test_topic_groups) 시험은 러너 환경에 따라 결과가 달라 로컬에서만 돌린다
-        run: cd tests && /usr/bin/python3 -m unittest test_lifecycle test_omp test_menubar test_focus test_summary_lang
+        run: cd macos/board/tests && /usr/bin/python3 -m unittest test_lifecycle test_omp test_focus test_summary_lang
       - run: macos/build.sh --dmg
       - name: Check the bundle
         run: |

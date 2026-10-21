@@ -65,11 +65,20 @@ Claude models offered in Settings are the current ones plus any found in your re
 
 ## Files
 
+Each product lives in its own folder and shares no code with the others.
+
+| Folder | Product |
+|---|---|
+| `macos/` | Spyhop.app. `app/` is the Swift shell, `board/` is the board the app bundles (`board.py`, `panel.html`, `orca_art.py`, its tests and `tools/demo_screens.py`), `build.sh` builds the app and DMG |
+| `legacy/mac-browser/` | The brew version (browser board and SwiftBar menu bar). Bug fixes only |
+| `docs/`, `site/` | README pictures, details and the intro page |
+
+Inside a board folder:
+
 | File | Role |
 |---|---|
-| `spyhop` | Starts the board and opens it |
 | `board.py` | Session discovery, summaries, board HTML, local server, settings |
 | `panel.html` | Menu bar panel |
-| `menubar/spyhop.5s.py` | SwiftBar plugin |
 | `orca_art.py` | Orca icon and animation art |
 | `tools/demo_screens.py` | Regenerates the screenshots in `docs/screenshots` from demo data |
+| `spyhop`, `menubar/spyhop.5s.py` | Brew command and SwiftBar plugin (`legacy/mac-browser/` only) |

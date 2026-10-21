@@ -1,0 +1,18 @@
+name: Legacy mac browser
+
+# brew 로 깔리는 맥 브라우저 판(legacy/mac-browser). 버그 수정만 받으므로 시험만 돌린다
+on:
+  pull_request:
+    paths: ['legacy/mac-browser/**', '.github/workflows/legacy-mac-browser.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests
+        # 브라우저 화면(test_board_ui)·동시 요청(test_robustness)·데모 화면(test_topic_groups) 시험은 러너 환경에 따라 결과가 달라 로컬에서만 돌린다
+        run: cd legacy/mac-browser/tests && /usr/bin/python3 -m unittest test_lifecycle test_omp test_menubar test_focus test_summary_lang

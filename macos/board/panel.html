@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spyhop</title><link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2032%2032%22%3E%3Cdefs%3E%3CclipPath%20id=%22t%22%3E%3Crect%20width=%2232%22%20height=%2226.2%22/%3E%3C/clipPath%3E%3C/defs%3E%3Crect%20width=%2232%22%20height=%2232%22%20rx=%228%22%20fill=%22%233182f6%22/%3E%3Cg%20clip-path=%22url%28%23t%29%22%3E%3Cg%20transform=%22translate%281.5%202%29%20scale%28.82%29%22%3E%3Cg%20stroke=%22%230b1220%22%20stroke-width=%22.7%22%20stroke-linejoin=%22round%22%3E%3Cpath%20fill=%22%2310131a%22%20d=%22M22%203C28%203%2030%209%2029%2017L28%2036C28%2047%2025%2055%2021%2059L28%2062L19%2061L11%2063L16%2057C10%2048%207%2037%208%2024C8%2013%2012%206%2018%204Q20%203%2022%203Z%22/%3E%3Cpath%20fill=%22%23fff%22%20stroke=%22none%22%20d=%22M28%2010Q30%2014%2028%2023L26%2039Q22%2042%2021%2035L23%2023Q27%2018%2028%2010Z%22/%3E%3Cpath%20fill=%22%23fff%22%20stroke=%22none%22%20d=%22M15%2012C12%2013%2012%2017%2015%2018C18%2019%2021%2016%2021%2013C20%2011%2017%2011%2015%2012Z%22/%3E%3Cpath%20fill=%22%2310131a%22%20d=%22M24%2029Q32%2033%2032%2040Q27%2039%2022%2033Z%22/%3E%3Ccircle%20cx=%2224%22%20cy=%2216%22%20r=%22.8%22%20fill=%22%2310131a%22%20stroke=%22none%22/%3E%3C/g%3E%3C/g%3E%3C/g%3E%3Cpath%20d=%22M3%2027.2%20Q7%2025.3%2011%2027.2%20T19%2027.2%20T27%2027.2%22%20fill=%22none%22%20stroke=%22%23fff%22%20stroke-width=%222.2%22%20stroke-linecap=%22round%22/%3E%3C/svg%3E">
+<style>
+:root{--bg:#f7f8fa;--card:#fff;--line:rgba(20,24,40,.08);--ink:#172b4d;--ink2:#44546f;--ink3:#8590a2;
+--wait:#3fa877;--busy:#e283b0;--done:#5cb88f;--now:#d9a944;--left:#d3d8e0;--chip:#eef0f4}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1f23;--card:#262a2f;--line:rgba(255,255,255,.07);--ink:#e6e9ee;
+--ink2:#a8b2bf;--ink3:#76808d;--left:#3d444c;--chip:#31363c;--wait:#5fc796;--busy:#ee9cc2}}
+*{box-sizing:border-box}html,body{margin:0;width:100%;overflow-x:hidden;background:var(--bg);color:var(--ink);
+font:12.5px/1.4 -apple-system,"Apple SD Gothic Neo",sans-serif;-webkit-user-select:none;user-select:none}
+html,body{height:100%;overflow:hidden}
+.wrap{padding:14px 14px 10px;height:100%;display:flex;flex-direction:column}  /* 머리·숫자·버튼은 고정, 세션 목록만 스크롤 */
+#list{flex:1;min-height:0;overflow-y:auto;margin:0 -4px;padding:0 4px}
+.top{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.logo{width:22px;height:22px;border-radius:6px;overflow:hidden;background:none;display:flex;align-items:center;justify-content:center}
+.top b{font-size:14px;flex:1}.top small{color:var(--ink3);font-size:11px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.stat{min-width:0;background:var(--card);border-radius:10px;padding:9px 11px;border:1px solid var(--line)}
+.stat span{display:block;font-size:11px;color:var(--ink3);font-weight:600}
+.stat b{font-size:22px;line-height:1.15;font-weight:800}
+.stat.wait b{color:var(--wait)}.stat.busy b{color:var(--busy)}
+.sec{margin-bottom:12px}
+.sec h3{display:flex;justify-content:space-between;margin:0 2px 6px;font-size:10.5px;letter-spacing:.06em;color:var(--ink3);font-weight:700}
+.list{background:var(--card);border-radius:10px;border:1px solid var(--line);overflow:hidden}
+.row{position:relative;padding:9px 11px 9px 14px;cursor:pointer;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}.row:hover{background:color-mix(in srgb,var(--ink) 5%,transparent)}
+.row:before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--st)}
+.row.wait{--st:var(--wait)}.row.busy{--st:var(--busy)}
+.l1{display:flex;gap:8px;align-items:baseline}
+.t{flex:1;min-width:0;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.w{font-size:11px;color:var(--ink3);white-space:nowrap}.wait .w{color:var(--wait);font-weight:600}
+.l2{display:flex;gap:8px;align-items:center;margin-top:5px}.l2 .ws{font-size:10.5px;color:var(--ink3);white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis}.l2 .bar{flex:1;margin-top:0}
+.l2 .s{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m{font-size:10px;color:var(--ink2);background:var(--chip);border-radius:4px;padding:1px 5px;white-space:nowrap}
+.fl{font-size:10px;font-weight:700;color:#dc2626;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:0 6px;white-space:nowrap}
+.bar{display:flex;gap:2px;margin-top:6px;height:4px;min-width:0}
+.bar i{flex:1;border-radius:2px;background:var(--left)}
+.bar i.done{background:var(--done)}.bar i.now{background:var(--now)}.bar i.blocked{background:transparent;box-shadow:inset 0 0 0 1.5px var(--wait)}.bar i.side{background:#a48bd1}
+.busy .bar i.now{animation:p 1.4s infinite}@keyframes p{50%{opacity:.35}}
+.x{position:absolute;right:8px;top:7px;font-size:10.5px;font-weight:600;color:var(--ink3);border:1px solid var(--line);
+border-radius:5px;padding:0 6px;background:var(--card);opacity:0;transition:opacity .15s}
+.row:hover .x{opacity:1}.x:hover{color:var(--wait);border-color:var(--wait)}.x.ask{opacity:1;color:#fff;background:var(--wait);border-color:var(--wait)}
+.empty{color:var(--ink3);text-align:center;padding:28px 0}
+.foot{display:flex;gap:8px;margin-top:8px;flex:none}
+.btn{flex:1;text-align:center;font-weight:600;font-size:12px;padding:7px 0;border-radius:8px;cursor:pointer;
+background:var(--card);border:1px solid var(--line);color:var(--ink)}
+.btn:hover{background:color-mix(in srgb,var(--ink) 6%,var(--card))}
+.toast{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);background:var(--ink);color:var(--bg);
+font-size:11.5px;padding:5px 10px;border-radius:6px;opacity:0;transition:opacity .2s}
+.toast.on{opacity:.92}
+
+*{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--ink3) 45%,transparent) transparent}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--ink3) 35%,transparent);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--ink3) 60%,transparent);background-clip:padding-box}
+::-webkit-scrollbar-corner{background:transparent}
+.fl.st{color:#b45309;background:#fffbeb;border-color:#fcd34d}</style></head><body><div class="wrap">
+<div class="top"><div class="logo">__LOGO__</div>
+<b>Spyhop</b><small id="ts"></small></div>
+<div class="stats"><div class="stat wait"><span>My turn</span><b id="nw">-</b></div>
+<div class="stat busy"><span>Working</span><b id="nb">-</b></div></div>
+<div id="list"></div>
+<div class="foot"><div class="btn" onclick="fetch('/open-board')">Open full board</div></div>
+</div><div class="toast" id="toast"></div>
+<script>
+function esc(x){return String(x||'').replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function waited(sec){var s=Math.max(0,Date.now()/1000-sec);return s<60?'now':s<3600?Math.floor(s/60)+'m':s<86400?Math.floor(s/3600)+'h':Math.floor(s/86400)+'d'}
+function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('on');setTimeout(function(){e.classList.remove('on')},1200)}
+function go(h,t){fetch('/switch?h='+encodeURIComponent(h)).then(function(r){return r.ok?r.text():'fail'}).then(function(x){toast(x==='fail'?'Pane not found':x==='app'?'Opened the app: '+t:'Switched: '+t)})}
+var pendingEnd=null;
+function end(ev,h,el){ev.stopPropagation();
+  if(pendingEnd!==h){pendingEnd=h;document.querySelectorAll('.x.ask').forEach(function(x){x.classList.remove('ask');x.textContent='End'});
+    el.classList.add('ask');el.textContent='Click again to end';setTimeout(function(){if(pendingEnd===h){pendingEnd=null;el.classList.remove('ask');el.textContent='End'}},4000);return}
+  pendingEnd=null;fetch('/close?k=__TOKEN__',{method:'POST',headers:{'Content-Type':'text/plain'},body:h})
+    .then(function(r){toast(r.ok?'Session ended':'Could not end session');setTimeout(load,1200)})}
+function render(d){
+  if(pendingEnd)return;  // 확인 중에는 다시 그리지 않는다
+  var ss=d.sessions||[],w=ss.filter(function(s){return s.status==='wait'}).length;
+  document.getElementById('nw').textContent=w;document.getElementById('nb').textContent=ss.length-w;
+  document.getElementById('ts').textContent=new Date(d.at*1000).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  function row(s){
+    var cur=(s.steps||[]).filter(function(f){return f.state==='now'||f.state==='blocked'})[0];
+    var bar=(s.steps||[]).map(function(f){return '<i class="'+f.state+'"></i>'}).join('');
+    var tip=[s.ws,(cur?'Now: '+cur.label:''),(s.total?s.done+'/'+s.total+' steps':''),s.model].filter(Boolean).join(' · ');
+    return '<div class="row '+s.status+'" onclick="go(\''+s.handle+'\',\''+esc(s.title).replace(/'/g,'')+'\')" title="'+esc(tip)+'">'
+      +'<div class="l1"><span class="t">'+esc(s.title)+'</span>'
+      +(s.fail?'<span class="fl" title="Summary failed - showing the last good one">Summary failed</span>':'')
+      +(s.stuck?'<span class="fl st" title="Working, but no transcript change for 5+ min">No progress</span>':'')
+      +'<span class="w">'+waited(s.since)+'</span></div>'
+      +'<div class="l2"><span class="ws">'+esc(s.ws)+'</span>'+(bar?'<div class="bar">'+bar+'</div>':'')+'</div>'
+      +'<span class="x" onclick="end(event,\''+s.handle+'\',this)">End</span></div>'}
+  // 내 차례(오래 기다린 순) → 작업 중(최근 순)
+  var waitL=ss.filter(function(s){return s.status==='wait'}).sort(function(a,b){return a.since-b.since});
+  var busyL=ss.filter(function(s){return s.status!=='wait'}).sort(function(a,b){return b.since-a.since});
+  function sec(name,list){return list.length?'<div class="sec"><h3><span>'+name+'</span><span>'+list.length+'</span></h3><div class="list">'+list.map(row).join('')+'</div></div>':''}
+  var html=sec('My turn',waitL)+sec('Working',busyL);
+  document.getElementById('list').innerHTML=html||'<div class="empty">The sea is calm · no sessions running</div>';
+}
+function load(){fetch('/state.json',{cache:'no-store'}).then(function(r){return r.json()}).then(render).catch(function(){})}
+load();setInterval(load,5000);
+</script></body></html>

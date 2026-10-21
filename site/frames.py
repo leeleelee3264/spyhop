@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
+sys.path.insert(0, os.path.join(HERE, '..', 'macos', 'board', 'tools'))
 import demo_screens as D  # noqa: E402
 
 tag = subprocess.run(['git', '-C', HERE, 'describe', '--tags', '--abbrev=0'], capture_output=True, text=True).stdout.strip()
