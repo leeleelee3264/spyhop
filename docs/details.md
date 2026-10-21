@@ -6,7 +6,7 @@ Reference for things the README doesn't need to say.
 
 | | |
 |---|---|
-| What | A local web board of every Claude Code / Codex session running on this Mac (in Orca, Terminal, iTerm2, Ghostty, WezTerm or any terminal), each shown as its own progress (done · now · next steps) |
+| What | A local web board of every Claude Code / Codex session running on this Mac (in Orca, Terminal, iTerm2, Ghostty, WezTerm, cmux or any terminal), each shown as its own progress (done · now · next steps) |
 | Platform | macOS, Python 3.9+ (standard library only, no `pip install`) |
 | Needs | one summarizer: `claude` or `codex` logged in, or a DeepSeek API key. The `orca` CLI is optional (adds workspace columns, moving and helper lines) |
 | DeepSeek (optional) | Faster summaries (about 6 s per session). Store a key once: `security add-generic-password -s deepseek-api -a "$USER" -w '<key>'` |
