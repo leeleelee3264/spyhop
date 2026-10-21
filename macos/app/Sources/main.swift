@@ -87,6 +87,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// 앱 메뉴 「Settings… ⌘,」: 보드 창을 열고 그 안의 설정 창을 띄운다(보드의 톱니바퀴와 같은 창)
+    @objc func openSettings() {
+        let opened = window == nil
+        showWindow()
+        let js = "var f=document.getElementById('f');if(f&&f.contentWindow&&f.style.display!=='none')f.contentWindow.postMessage('spyhop:settings','*')"
+        // 창을 막 열었으면 보드를 불러올 때까지 조금 기다린다
+        for d in opened ? [1.0, 2.5] : [0.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + d) { [weak self] in self?.boardView?.evaluateJavaScript(js) }
+        }
+    }
+
     // 창이 다른 앱·다른 데스크톱에 완전히 가려지면 웹 화면을 숨겨 쉬게 한다. 브라우저가 가려진 탭을 멈추는 것과 같게
     // (그대로 두면 WebKit 이 가려진 채로 계속 그린다. 실측 CPU 30%대 → 1% 아래)
     func windowDidChangeOcclusionState(_ n: Notification) {
@@ -115,7 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         }
     }
 
-    var boardView: WKWebView? { window?.contentView?.subviews.first as? WKWebView }
+    var boardView: WKWebView? { window?.contentView?.subviews.lazy.compactMap { $0 as? WKWebView }.first }  // 도구 막대가 생기면 맨 앞 자식이 웹 화면이 아닐 수 있다
 
     @objc func reload() {
         guard let v = boardView else { return }
@@ -272,6 +283,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         let main = NSMenu()
         let app = NSMenu()
         app.addItem(withTitle: "About Spyhop", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        app.addItem(.separator())
+        app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
         app.addItem(.separator())
         app.addItem(withTitle: "Hide Spyhop", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         app.addItem(withTitle: "Quit Spyhop", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

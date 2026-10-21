@@ -3801,6 +3801,7 @@ function doEnd(){var h=endTarget,stop=busy();cancelEnd();
 
 // 열기는 :target CSS 효과 하나만 사용한다. hashchange 이후 효과를 시작하면 첫 프레임이 먼저 보인다.
 function closeModal(){location.hash=''}
+addEventListener('message',function(e){if(e.source===parent&&e.data==='spyhop:settings')location.hash='settings'});  // 앱 메뉴 「Settings… ⌘,」
 document.addEventListener('click',function(e){var x=e.target.closest&&e.target.closest('.modal .x, .modal .bg');if(x&&x.getAttribute('href')==='#'){e.preventDefault();closeModal()}});
 var WS=__WSLIST__,drag=null;
 // 카드 끌기: 지라 칸반처럼 카드가 손을 따라오고, 놓으면 그 칸으로 미끄러져 들어간다 (마우스 이벤트로 직접 구현)
