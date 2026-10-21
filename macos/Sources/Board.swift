@@ -114,7 +114,7 @@ enum Board {
         guard let born = startTime(pid), abs(born - started) < 2,
               let args = output("/bin/ps", ["-o", "args=", "-p", String(pid)])?.trimmingCharacters(in: .whitespacesAndNewlines),
               args.hasSuffix(" --watch"), let at = args.range(of: " /"),
-              realPath(String(args[at.upperBound...].dropLast(" --watch".count))) == path || args.hasSuffix(path + " --watch") else { return }
+              realPath(String(args[args.index(after: at.lowerBound)...].dropLast(" --watch".count))) == path || args.hasSuffix(path + " --watch") else { return }
         kill(pid, SIGTERM)
         for _ in 0..<50 where kill(pid, 0) == 0 { usleep(100_000) }
         // 헤더 버전 배지가 「vX 에서 업데이트됨」을 보이게 brew 업그레이드 때와 같은 기록을 남긴다
@@ -145,7 +145,7 @@ enum Board {
             guard let d = FileManager.default.contents(atPath: dir + "/" + f),
                   let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
                   let n = j["pid"] as? Int, let pid = Int32(exactly: n), pid > 0, let start = j["start"] as? Double,
-                  j["busy"] is Bool, j["cwd"] is String, j["sid"] is String,
+                  (j["busy"] as? NSNumber).map({ CFGetTypeID($0) == CFBooleanGetTypeID() }) == true, j["cwd"] is String, j["sid"] is String,
                   let born = startTime(pid), abs(born - start) < 5 else { continue }
             return true
         }
