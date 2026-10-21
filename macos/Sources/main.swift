@@ -204,10 +204,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         } else if !want && have {
             try? FileManager.default.removeItem(atPath: mine)
         }
-        // 서버 로그인 항목이 옛 자리의 앱 코드를 가리키는데 그 자리가 비었으면(앱을 옮김) 이 자리로 고친다. brew 설치본이나 남아 있는 다른 앱은 그대로 둔다
+        // 서버 로그인 항목을 이 앱 코드로 맞춘다: brew 설치본을 가리키면(앱이 깔리면 `spyhop` 도 앱을 연다) 또는 옛 자리의 앱 코드인데 그 자리가 비었으면(앱을 옮김).
+        // 그대로 두면 다음 로그인 때 brew 쪽 서버가 먼저 떠서 앱이 옛 보드를 보인다. 남아 있는 다른 앱은 그대로 둔다
         let board = dir + "/com.spyhop.board.plist"
-        if want, let d = NSMutableDictionary(contentsOfFile: board), var a = d["ProgramArguments"] as? [String], a.count > 1,
-           a[1] != Board.script, a[1].hasSuffix(".app/Contents/Resources/spyhop/board.py"), !FileManager.default.fileExists(atPath: a[1]) {
+        if want, let d = NSMutableDictionary(contentsOfFile: board), var a = d["ProgramArguments"] as? [String], a.count > 1, a[1] != Board.script,
+           a[1].contains("/opt/spyhop/") || a[1].contains("/Cellar/spyhop/")
+            || (a[1].hasSuffix(".app/Contents/Resources/spyhop/board.py") && !FileManager.default.fileExists(atPath: a[1])) {
+            a[0] = "/usr/bin/python3"  // 앱이 서버를 띄울 때와 같은 파이썬
             a[1] = Board.script
             d["ProgramArguments"] = a
             d.write(toFile: board, atomically: true)
