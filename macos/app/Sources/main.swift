@@ -166,7 +166,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         vc.view = v
         popover.contentViewController = vc
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-        vc.view.window?.makeKey()
+        // 다른 앱(또는 보드 창)이 전체 화면이면 패널이 그 공간 위에 뜨지 못하고 바탕 공간에 떠서 안 보인다.
+        // 어느 공간·전체 화면 위에도 뜨게 하고 앞으로 올린다(메뉴바 앱들이 쓰는 방식)
+        if let pw = vc.view.window {
+            pw.collectionBehavior.formUnion([.canJoinAllSpaces, .fullScreenAuxiliary])
+            pw.orderFrontRegardless()
+            pw.makeKey()
+        }
     }
 
     func popoverDidClose(_ n: Notification) {
