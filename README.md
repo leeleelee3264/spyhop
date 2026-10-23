@@ -43,7 +43,7 @@ You need macOS 13 or later, Homebrew, the Xcode Command Line Tools (`xcode-selec
    ```
 
 2. The board opens in its own window, and the orca in the menu bar shows how many sessions are waiting for you.
-3. Start or keep a Claude Code or Codex session running anywhere (Orca, Terminal, iTerm2, Ghostty, WezTerm). It shows up as a card within a few seconds, and its steps fill in once the first summary is done.
+3. Start or keep a Claude Code or Codex session running anywhere (Orca, Terminal, iTerm2, Ghostty, WezTerm, or the Claude desktop app’s local Code sessions). It shows up as a card within a few seconds, and its steps fill in once the first summary is done.
 4. Click a card to see every step, the last reply and its TODO list. **Go to session** jumps to that pane or tab.
 
 Closing the window keeps the orca in the menu bar; **Start at login** in Settings opens it there at login.
@@ -108,16 +108,16 @@ brew uninstall --cask spyhop && rm -rf ~/.spyhop
 
 ### What works where
 
-| | Orca | Terminal, iTerm2, Ghostty, WezTerm | Other terminals |
-|---|---|---|---|
-| Card, steps, summary, detail view | ✅ | ✅ | ✅ |
-| Columns (Group by: Location) | Orca workspaces | folder and terminal (e.g. `workspace · iTerm2`) | folder and terminal |
-| Go to session | the exact pane | the exact tab | brings the app to the front |
-| End session | closes that split pane | stops the AI program, the tab stays | stops the AI program, the tab stays |
-| Drag a card to move the session to another workspace | ✅ | ❌ | ❌ |
-| Cross-check line under a card (panes started through Orca) | ✅ | ❌ | ❌ |
-| AI topic grouping | ✅ | ✅ | ✅ |
-| Doctor (`board.py --doctor`) | ✅ | ✅ | ✅ |
+| | Orca | Terminal, iTerm2, Ghostty, WezTerm | Claude desktop app (local Code sessions) | Other terminals |
+|---|---|---|---|---|
+| Card, steps, summary, detail view | ✅ | ✅ | ✅ | ✅ |
+| Columns (Group by: Location) | Orca workspaces | folder and terminal (e.g. `workspace · iTerm2`) | folder (`workspace · Claude App`) | folder and terminal |
+| Go to session | the exact pane | the exact tab | that session in the app | brings the app to the front |
+| End session | closes that split pane | stops the AI program, the tab stays | stops the AI program, the session stays in the sidebar | stops the AI program, the tab stays |
+| Drag a card to move the session to another workspace | ✅ | ❌ | ❌ | ❌ |
+| Cross-check line under a card (panes started through Orca) | ✅ | ❌ | ❌ | ❌ |
+| AI topic grouping | ✅ | ✅ | ✅ | ✅ |
+| Doctor (`board.py --doctor`) | ✅ | ✅ | ✅ | ✅ |
 
 ### On the board
 

@@ -1018,13 +1018,17 @@ def agent_procs():
             a['why'] = 'claude:stale-registration'
             continue
         a['busy'] = d.get('status') == 'busy'
+        # 클로드 데스크톱 앱(Code 탭)에서 띄운 세션: 터미널(tty)은 없지만 앱이 등록 파일에 표시해 둔다
+        a['desktop'] = d.get('entrypoint') == 'claude-desktop'
+        a['host_sid'] = d.get('hostSessionId') if a['desktop'] else None
+        a['name'] = d.get('name') or ''
         sid = d.get('sessionId')
         cwd = d.get('cwd') or a.get('cwd') or ''
         f = os.path.expanduser('~/.claude/projects/%s/%s.jsonl' % (re.sub(r'[^A-Za-z0-9]', '-', cwd), sid))
         if not os.path.exists(f):
             f = next(iter(glob.glob(os.path.expanduser('~/.claude/projects/*/%s.jsonl' % sid))), None)
         if f:
-            a.update(log=f, how='claude:process')
+            a.update(log=f, how='claude:desktop-app' if a['desktop'] else 'claude:process')
         else:
             a['why'] = 'claude:transcript-not-written-yet'
     # Codex: 열어 둔 기록 파일(프로그램 자신 또는 Codex 서버)이 후보다
@@ -1070,6 +1074,7 @@ def agent_procs():
 
 
 # ---------- 오르카 밖 터미널 (iTerm2 · 터미널 · Ghostty · WezTerm …) ----------
+DESKTOP_LABEL = 'Claude App'  # 클로드 데스크톱 앱의 Code 탭
 TERM_LABEL = {'Apple_Terminal': 'Terminal', 'iTerm.app': 'iTerm2', 'WezTerm': 'WezTerm', 'ghostty': 'Ghostty',
               'vscode': 'VS Code', 'tmux': 'tmux', 'WarpTerminal': 'Warp', 'Hyper': 'Hyper', 'kitty': 'kitty', 'alacritty': 'Alacritty'}
 
@@ -1078,17 +1083,22 @@ def outside_terms():
     """오르카 창이 아닌 곳에서 돌고 있는 AI 프로그램을 창처럼 만든다 (칸 = 폴더 · 터미널)."""
     out, wts = [], {}
     for a in agent_procs().values():
-        if a.get('orca_pane_key') or a.get('tty') in (None, '??'):
-            continue  # 오르카 창이거나, 화면 없는 프로그램(서버·백그라운드)
+        if a.get('orca_pane_key'):
+            continue  # 오르카 창
+        if a.get('tty') in (None, '??') and not a.get('desktop'):
+            continue  # 화면 없는 프로그램(서버·백그라운드). 데스크톱 앱 세션만 tty 없이도 세션으로 본다
         cwd = a.get('cwd') or ''
-        label = TERM_LABEL.get(a.get('term_program') or '', a.get('term_program') or 'Terminal')
+        if a.get('desktop'):
+            label = DESKTOP_LABEL
+        else:
+            label = TERM_LABEL.get(a.get('term_program') or '', a.get('term_program') or 'Terminal')
         wid = 'term:%s:%s' % (label, cwd)
         wts[wid] = {'id': wid, 'displayName': '%s · %s' % (os.path.basename(cwd) or cwd, label), 'path': cwd, 'sortOrder': -1}
         try:
             last = os.path.getmtime(a['log']) * 1000 if a.get('log') else a['start'] * 1000
         except OSError:
             last = a['start'] * 1000
-        t = {'handle': 'proc_%d' % a['pid'], 'title': '', 'tabId': 'proc', 'leafId': str(a['pid']), 'worktreeId': wid,
+        t = {'handle': 'proc_%d' % a['pid'], 'title': a.get('name') or '', 'tabId': 'proc', 'leafId': str(a['pid']), 'worktreeId': wid,
              'worktreePath': cwd, 'ptyId': '', 'lastOutputAt': last, '_proc': a, '_ext': label}
         if a['kind'] == 'claude' and 'busy' in a:
             t['agent'] = {'state': 'working' if a['busy'] else 'done'}
@@ -1114,6 +1124,8 @@ def focus_outside(pid):
 
     def app(name):
         return 'app' if _open_app(name) else ''
+    if a.get('desktop'):  # 데스크톱 앱은 세션 딥링크를 받는다. 못 열면 앱만 앞으로
+        return 'tab' if a.get('host_sid') and _open_url('claude://code/continue?session=%s' % a['host_sid']) and _open_app('Claude') else app('Claude')
     tty = '/dev/' + a.get('tty', '')
     tp = a.get('term_program') or ''
     if tp == 'Apple_Terminal':
@@ -1193,6 +1205,13 @@ def _open_app(name):
     # 앞으로 가져오기는 open -a 가 가장 잘 먹힌다 (macOS 가 다른 프로그램의 activate 요청은 무시할 때가 있다)
     try:
         return subprocess.run(['open', '-a', name], capture_output=True, timeout=8).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _open_url(url):
+    try:
+        return subprocess.run(['open', url], capture_output=True, timeout=8).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -3392,7 +3411,8 @@ def doctor(argv):
             if o in ('card', 'card-new-session') and e.get('terminal'):
                 term = e['terminal']
                 say('        · runs in %s (Go to session: %s)' % (term, 'exact pane' if term == 'Orca' else
-                    'exact tab' if term in ('Terminal', 'iTerm2', 'Ghostty', 'WezTerm') else 'brings the app to the front only'))
+                    'exact tab' if term in ('Terminal', 'iTerm2', 'Ghostty', 'WezTerm') else
+                    'that session in the app' if term == DESKTOP_LABEL else 'brings the app to the front only'))
             if o in ('helper', 'helper-older-hidden'):
                 say('        · under the card of %s%s (a card shows one helper: a working one first, else the newest)' % ((e.get('parent') or '?')[:13],
                     (', started by helper %s' % e['via'][:13]) if e.get('via') else ''))
