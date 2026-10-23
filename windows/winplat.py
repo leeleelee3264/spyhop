@@ -402,6 +402,25 @@ def focus_desktop_app():
     return ''
 
 
+def open_claude_session(session_id):
+    """Claude 앱에서 그 Code 탭 세션을 연다 (앱의 딥링크 claude://code/continue?session=<앱 세션 번호>, 예: local_…).
+    앱이 claude:// 를 받지 않으면 False."""
+    import winreg
+    from urllib.parse import quote
+    if not session_id:
+        return False
+    try:
+        winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, 'claude'))
+    except OSError:
+        return False
+    try:
+        u32.AllowSetForegroundWindow(0xFFFFFFFF)  # 앱이 그 창을 앞으로 가져올 수 있게
+        os.startfile('claude://code/continue?session=' + quote(session_id, safe=''))
+        return True
+    except OSError:
+        return False
+
+
 def focus_codex_app():
     """Codex 데스크톱 앱 창을 앞으로. 이 앱은 OpenAI.Codex 패키지 안의 ChatGPT.exe 다. 'app' 또는 ''."""
     for pid, hwnd in _top_windows().items():
@@ -481,6 +500,60 @@ def windowed_python():
     exe = sys.executable
     alt = os.path.join(os.path.dirname(exe), 'pythonw.exe')
     return alt if os.path.exists(alt) else exe
+
+
+TRAY_CLASS = 'SpyhopTray'  # 트레이의 숨은 창 이름 (tray.py)
+WM_OPEN_BOARD = 0x8000 + 2  # WM_APP + 2: 떠 있는 트레이에 「보드 창 열어」 (시작 메뉴 아이콘 · 패널의 Open full board)
+u32.FindWindowW.restype = W.HWND
+u32.FindWindowW.argtypes = [W.LPCWSTR, W.LPCWSTR]
+u32.PostMessageW.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
+u32.AllowSetForegroundWindow.argtypes = [W.DWORD]
+
+
+def ask_tray_to_open_board():
+    """떠 있는 트레이에게 보드 창을 열라고 전한다. 트레이가 없으면 False."""
+    hwnd = u32.FindWindowW(TRAY_CLASS, None)
+    if not hwnd:
+        return False
+    u32.AllowSetForegroundWindow(0xFFFFFFFF)  # ASFW_ANY: 방금 사용자가 누른 쪽이 앞으로 가져오기 권한을 넘겨준다
+    return bool(u32.PostMessageW(hwnd, WM_OPEN_BOARD, 0, 0))
+
+
+def _powershell(script):
+    """PowerShell 스크립트를 돌리고 출력 줄들을 돌려준다. 한글 경로가 안 깨지게 UTF-16 으로 인코딩해 넘긴다."""
+    import base64
+    enc = base64.b64encode(('[Console]::OutputEncoding = [Text.Encoding]::UTF8\n' + script).encode('utf-16-le')).decode()
+    r = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-EncodedCommand', enc],
+                       capture_output=True, timeout=60, creationflags=CREATE_NO_WINDOW)
+    if r.returncode:
+        raise OSError(r.stderr.decode('utf-8', 'ignore').strip()[:300])
+    return [x for x in r.stdout.decode('utf-8', 'ignore').splitlines() if x.strip()]
+
+
+def _ps(s):
+    return "'" + s.replace("'", "''") + "'"
+
+
+def make_shortcuts(name, target, args, icon, workdir, description, places=('Programs', 'Desktop')):
+    """시작 메뉴(Programs)와 바탕 화면(Desktop)에 바로가기를 만든다. places 에는 폴더 경로도 된다(시험용). 만든 경로들을 돌려준다."""
+    script = ''.join(
+        "$f = %s; if (-not [IO.Path]::IsPathRooted($f)) { $f = [Environment]::GetFolderPath($f) }\n"
+        "$p = Join-Path $f %s\n"
+        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($p)\n"
+        "$s.TargetPath = %s; $s.Arguments = %s; $s.IconLocation = %s; $s.WorkingDirectory = %s; $s.Description = %s\n"
+        "$s.Save(); $p\n" % (_ps(place), _ps(name + '.lnk'), _ps(target), _ps(args), _ps(icon + ',0'), _ps(workdir), _ps(description))
+        for place in places)
+    return _powershell(script)
+
+
+def remove_shortcuts(name, places=('Programs', 'Desktop')):
+    """make_shortcuts 로 만든 바로가기를 지운다. 지운 경로들을 돌려준다."""
+    script = ''.join(
+        "$f = %s; if (-not [IO.Path]::IsPathRooted($f)) { $f = [Environment]::GetFolderPath($f) }\n"
+        "$p = Join-Path $f %s\n"
+        "if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p; $p }\n" % (_ps(place), _ps(name + '.lnk'))
+        for place in places)
+    return _powershell(script)
 
 
 RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'

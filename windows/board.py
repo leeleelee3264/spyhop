@@ -1093,6 +1093,7 @@ def agent_procs():
             a['why'] = 'claude:stale-registration'
             continue
         a['busy'] = d.get('status') == 'busy'
+        a['host_session'] = d.get('hostSessionId')  # Claude 앱이 띄운 세션의 앱 쪽 번호 (딥링크로 그 세션을 연다)
         sid = d.get('sessionId')
         cwd = d.get('cwd') or a.get('cwd') or ''
         if not a.get('cwd'):
@@ -1178,11 +1179,48 @@ def _cowork_busy(folder):
         return False
 
 
+# 보드에서 End session 으로 끝낸 세션. 프로그램을 끝내도 앱 기록은 남아서, 그대로 두면 「잠든 앱 세션」 으로 다시 뜬다.
+# 끝낸 뒤로 대화 기록이 늘지 않은 동안은 숨기고, 앱에서 다시 쓰면(기록이 늘면) 다시 보인다
+ENDED_FILE = os.path.expanduser('~/.spyhop/ended.json')
+ENDED_GRACE = 30  # 끝낸 직후 프로그램·앱이 마지막 줄을 더 쓰는 것은 새 대화로 치지 않는다
+
+
+def load_ended():
+    try:
+        with open(ENDED_FILE, encoding='utf-8') as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in d.items() if isinstance(v, (int, float))} if isinstance(d, dict) else {}
+
+
+def mark_ended(log, now=None):
+    """이 대화 기록의 세션을 끝냈다고 적어 둔다. 오래된 것은 지운다."""
+    if not log:
+        return
+    now = now or time.time()
+    d = {k: v for k, v in load_ended().items() if now - v < APP_RECENT + 86400}
+    d[os.path.basename(log)[:-6]] = now
+    save_json(ENDED_FILE, d)
+
+
+def ended_quietly(log, ended=None):
+    """보드에서 끝낸 뒤로 새 대화가 없는 세션인가."""
+    at = (load_ended() if ended is None else ended).get(os.path.basename(log)[:-6])
+    if not at:
+        return False
+    try:
+        return os.path.getmtime(log) <= at + ENDED_GRACE
+    except OSError:
+        return True
+
+
 def app_sessions(live_ids=(), now=None):
-    """Claude 앱의 Code 탭·Cowork 세션 중 프로그램이 안 떠 있는 것. live_ids(지금 떠 있는 대화 번호)는 뺀다.
+    """Claude 앱의 Code 탭·Cowork 세션 중 프로그램이 안 떠 있는 것. live_ids(지금 떠 있는 대화 번호)와
+    보드에서 끝낸 뒤 다시 쓰지 않은 세션은 뺀다.
     [{'kind': 'code'|'cowork', 'id', 'cli', 'log', 'cwd', 'busy', 'last', 'title'}]"""
     now = now or time.time()
-    out = []
+    out, ended = [], load_ended()
     for kind, sub in (('code', 'claude-code-sessions'), ('cowork', 'local-agent-mode-sessions')):
         for f in glob.glob(os.path.join(CLAUDE_APP_DIR, sub, '*', '*', 'local_*.json')):
             try:
@@ -1209,7 +1247,7 @@ def app_sessions(live_ids=(), now=None):
                 busy = _cowork_busy(folder)
                 picked = [x for x in d.get('userSelectedFolders') or [] if isinstance(x, str)]
                 cwd = picked[0] if picked else ''
-            if log:
+            if log and not ended_quietly(log, ended):
                 out.append({'kind': kind, 'id': d.get('sessionId') or cli, 'cli': cli, 'log': log, 'cwd': cwd,
                             'busy': busy, 'last': last, 'title': d.get('title') or ''})
     return out
@@ -1238,12 +1276,12 @@ def codex_app_sessions(live_ids=(), now=None, home=None):
     except sqlite3.Error as e:
         sys.stderr.write('codex app threads: %s\n' % e)
         return []
-    out = []
+    out, ended = [], load_ended()
     for tid, log, cwd, updated, source, originator, title in rows:
         # 'user' = 사용자가 연 스레드. 예전 버전은 둘 다 비어 있다. 발신 앱은 있는데 출처가 비면 가져온 스레드다
         if not (source == 'user' or (source is None and originator is None)):
             continue
-        if not log or not os.path.exists(log) or os.path.basename(log)[:-6] in live_ids:
+        if not log or not os.path.exists(log) or os.path.basename(log)[:-6] in live_ids or ended_quietly(log, ended):
             continue
         busy = False
         try:
@@ -1256,11 +1294,13 @@ def codex_app_sessions(live_ids=(), now=None, home=None):
     return out
 
 
-def focus_claude_app(kind='code'):
-    """그 세션을 돌리는 데스크톱 앱(Claude 또는 Codex)을 앞으로 (앱 안의 그 세션까지는 못 고른다)."""
-    if WIN:
-        return winplat.focus_codex_app() if kind == 'codex-app' else winplat.focus_desktop_app()
-    return 'app' if _open_app('Codex' if kind == 'codex-app' else 'Claude') else ''
+def focus_claude_app(kind='code', session=None):
+    """데스크톱 앱 세션으로 간다. Claude 앱 Code 탭 세션은 앱의 딥링크로 그 세션까지('session'),
+    Cowork · Codex 앱은 세션을 고르는 주소가 알려져 있지 않아 앱만 앞으로('desktop')."""
+    if kind == 'code' and session and winplat.open_claude_session(session):
+        return 'session'
+    ok = winplat.focus_codex_app() if kind == 'codex-app' else winplat.focus_desktop_app()
+    return 'desktop' if ok else ''
 
 
 def outside_terms():
@@ -1318,7 +1358,9 @@ def focus_outside(pid):
     a = agent_procs().get(pid)
     if not a:
         return ''
-    if WIN:  # 탭까지는 못 고르고, 그 세션이 도는 창(터미널·Claude 앱)을 앞으로
+    if a.get('term_program') == 'Claude app':  # Claude 앱이 돌리는 세션: 딥링크로 그 세션까지
+        return focus_claude_app('code', a.get('host_session'))
+    if WIN:  # 탭까지는 못 고르고, 그 세션이 도는 창(터미널)을 앞으로
         return winplat.focus(pid)
 
     def app(name):
@@ -2847,9 +2889,6 @@ def serve():
                 return self.send(200, open(OUT, 'rb').read(), 'text/html; charset=utf-8')
             if u.path == '/panel':
                 page = open(PANEL, encoding='utf-8').read().replace('</style>', THEME_CSS + '</style>', 1)
-                if WIN:  # 보드 서버가 브라우저를 열면 백그라운드라 창이 뒤에 숨는다. 앞에 있는 패널 창이 직접 연다
-                    page = page.replace('<div class="btn" onclick="fetch(\'/open-board\')">Open full board</div>',
-                                        '<a class="btn" href="/" target="_blank" rel="noopener" style="text-decoration:none">Open full board</a>')
                 page = page.replace('__TOKEN__', token()).replace('__LOGO__', orca_art.tile(uid='pl').replace('<svg ', '<svg width="22" height="22" ', 1)) \
                     .replace('<html lang="ko">', '<html lang="ko" data-theme="%s">' % current_theme(), 1)
                 return self.send(200, page.encode(), 'text/html; charset=utf-8')
@@ -2868,8 +2907,8 @@ def serve():
                 if h not in known:  # 지금 목록에 있는 창만 이동시킨다
                     return self.send(404, b'unknown')
                 if h.startswith('proc_app_'):  # 데스크톱 앱 세션: 그 앱을 앞으로
-                    kind = next((t['_proc'].get('app_kind') for t in outside_terms()[0] if t['handle'] == h), 'code')
-                    return self.send(200, (focus_claude_app(kind) or 'fail').encode())
+                    a = next((t['_proc'] for t in outside_terms()[0] if t['handle'] == h), {})
+                    return self.send(200, (focus_claude_app(a.get('app_kind', 'code'), a.get('app_session')) or 'fail').encode())
                 if h.startswith('proc_'):  # 결과를 글로 돌려준다: tab(그 탭까지) / app(앱만) / fail
                     return self.send(200, (focus_outside(int(h[5:])) or 'fail').encode())
                 r = subprocess.run(['orca', 'terminal', 'switch', '--terminal', h], capture_output=True, timeout=10)
@@ -2947,18 +2986,27 @@ def serve():
             known = {h for x in json.load(open(STATE)).get('sessions', []) for h in [x['handle']] + x.get('helpers', [])}
             if h not in known:
                 return self.send(404, b'unknown')
-            if h.startswith('proc_app_'):  # 앱 기록으로만 찾은 세션은 끝낼 프로그램이 없다
-                return self.send(409, b'This session lives in a desktop app (Claude or Codex). End or archive it there.')
+            if h.startswith('proc_app_'):  # 앱 기록으로만 찾은 세션은 끝낼 프로그램이 없다: 앱에서 다시 쓸 때까지 보드에서 숨긴다
+                a = next((t['_proc'] for t in outside_terms()[0] if t['handle'] == h), {})
+                if not a.get('log'):
+                    return self.send(404, b'That session is no longer on the board.')
+                mark_ended(a['log'])
+                WAKE.set()
+                sys.stderr.write('close %s: hidden until used again\n' % h)
+                return self.send(200, b'ok')
             if h.startswith('proc_'):  # 오르카 밖 세션: 그 AI 프로그램만 끝낸다(터미널 탭은 남는다). 지금 보드가 찾은 claude/codex 일 때만
                 pid = int(h[5:])
-                if pid not in agent_procs():
+                procs = agent_procs()
+                if pid not in procs:
                     return self.send(404, b'That session is no longer running.')
+                log = procs[pid].get('log') or procs[pid].get('bound')
                 try:
                     os.kill(pid, signal.SIGTERM)
                     for _ in range(30):
                         time.sleep(.1)
                         check_alive(pid)
                 except ProcessLookupError:
+                    mark_ended(log)  # 앱 기록이 남아 있어도 「잠든 세션」 으로 다시 뜨지 않게
                     _PROC_CACHE['at'] = 0
                     WAKE.set()
                     sys.stderr.write('close %s: ended\n' % h)
@@ -3401,8 +3449,9 @@ def installed_app():
 
 def open_board():
     """메뉴바의 'Open full board': Spyhop.app 이 깔려 있으면 앱 창으로, 없으면 기본 브라우저로 보드를 연다."""
-    if WIN:
-        os.startfile('http://127.0.0.1:%d/' % PORT)
+    if WIN:  # 트레이가 떠 있으면 Spyhop 창(전용 Edge 앱 창)으로, 없으면 기본 브라우저로
+        if not winplat.ask_tray_to_open_board():
+            os.startfile('http://127.0.0.1:%d/' % PORT)
         return
     app = installed_app()
     if not app or subprocess.run(['open', '-a', app], capture_output=True).returncode != 0:
@@ -4019,8 +4068,9 @@ function peek(){  // 세션이 일을 끝내면 헤더 물결에서 범고래가
 function toast(t,ms){var e=document.getElementById('toast');e.textContent=t;e.className='on';clearTimeout(e._t);e._t=setTimeout(function(){e.className=''},ms||1600)}
 var endTarget=null;
 function askEnd(h,btn){endTarget=h;var t=btn.dataset.title||btn.closest('.box').querySelector('h2').textContent;
-  document.getElementById('cft').textContent=t;document.getElementById('cfx').textContent=h.indexOf('proc_')===0?
-    'Only the AI program ends; the terminal tab stays open.':'Only this pane closes; other panes in the tab stay.';document.getElementById('confirm').className='on'}
+  document.getElementById('cft').textContent=t;document.getElementById('cfx').textContent=h.indexOf('proc_app_')===0?
+    'Hides it from the board until you use it again in the app.':h.indexOf('proc_')===0?
+    'Only the AI program ends; the terminal tab stays open. It stays off the board until you use it again.':'Only this pane closes; other panes in the tab stay.';document.getElementById('confirm').className='on'}
 // 카드 동작 줄: 0.2초 머물면 뜨고, 벗어나면 바로 사라진다(훑고 지나갈 때 깜빡이지 않게)
 var hovC=null,hovT=null;
 function hovOff(){clearTimeout(hovT);if(hovC)hovC.classList.remove('hov');hovC=null}
@@ -4194,7 +4244,8 @@ function setSum(v){fetch('http://127.0.0.1:47613/config?k=__TOKEN__',{method:'PO
   .catch(function(){toast('Board server is not running')})}
 function go(h){fetch('http://127.0.0.1:47613/switch?h='+encodeURIComponent(h))
   .then(function(r){return r.text()}).then(function(t){toast(t==='pane'?'Switched to the Orca pane':t==='tab'?'Switched to the terminal tab':
-    t==='app'?'Opened the terminal app · could not find the exact tab':'Could not find that session’s window')}).catch(function(){toast('Board server is not running · restart it with ./spyhop')})}
+    t==='session'?'Opened that session in the Claude app':t==='desktop'?'Brought the app to the front · pick the session there':
+    t==='app'?'Opened the terminal app · could not find the exact tab':'Could not find that session’s window')}).catch(function(){toast('Board server is not running · restart it with spyhop.cmd')})}
 // 칸이 화면 높이를 넘으면 그 칸의 카드를 아래쪽부터 한 장씩, 덜 중요한 것부터 줄인다.
 // 줄이는 순서: 요약 빼기 → 마지막 답 빼기 → 단계를 막대로 → 제목 1줄. 단계가 이 보드의 핵심이라 가장 늦게 줄인다.
 // 위쪽 카드(오래 기다린 내 차례)는 끝까지 단계·마지막 답이 남는다. 창 크기가 바뀌면 전부 풀고 다시 맞춘다

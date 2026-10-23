@@ -8,14 +8,18 @@ You need Windows 10 or 11, Python 3.9+ (`winget install Python.Python.3.12`), an
 
 ```powershell
 git clone https://github.com/leeleelee3264/spyhop
-.\spyhop\windows\spyhop.cmd
+.\spyhop\windows\spyhop.cmd install
 ```
 
-Or download the repository as a ZIP from GitHub, unzip it, and run `windows\spyhop.cmd`. To update, run `git pull` (or download the ZIP again).
+Or download the repository as a ZIP from GitHub, unzip it, and run `windows\spyhop.cmd install`. To update, run `git pull` (or download the ZIP again).
 
-The board opens in your default browser at `http://127.0.0.1:47613/`. `spyhop.cmd doctor` explains how each session was found, or why it was not.
+`install` adds a **Spyhop** icon to the Start menu and the desktop. Open it like any app: the board shows in its own window, and the tray icon starts with it. `spyhop.cmd` with no option does the same without adding icons, and `spyhop.cmd uninstall` removes the icons and turns off Start at login. `spyhop.cmd doctor` explains how each session was found, or why it was not.
 
-A **tray icon** appears next to the clock. It shows how many sessions are waiting for you (gray when the board is off). Click it to open the small board panel; right-click it to see every session and jump to one. It also restarts the board when Claude or Codex runs. Choose **Hide tray icon** at the bottom of its right-click menu to remove it; `spyhop.cmd` brings it back.
+The Spyhop window is a Microsoft Edge app window (no address bar) with a profile of its own (`%LOCALAPPDATA%\Spyhop\window`), so it does not mix with your usual Edge and shows as its own button on the taskbar. Opening Spyhop again brings the same window back instead of opening another. The board also works in any browser at `http://127.0.0.1:47613/`. Unlike the macOS app, this saves no memory: the window uses the same engine as Edge.
+
+A **tray icon** appears next to the clock, like the macOS app's menu bar icon. It shows how many sessions are waiting for you (gray when the board is off). Click it to open the small board panel; right-click it to see every session and jump to one, or to open the board window. It also restarts the board when Claude or Codex runs. Choose **Hide tray icon** at the bottom of its right-click menu to remove it; opening Spyhop brings it back. At login (Start at login) only the tray icon and the board start, no window, as on macOS.
+
+`windows/spyhop.ico` is made from the macOS app icon by `python windows/tools/make_icon.py`; run it again when that icon changes.
 
 ## What works
 
@@ -24,7 +28,7 @@ A **tray icon** appears next to the clock. It shows how many sessions are waitin
 - **Codex desktop app** threads (Codex inside the ChatGPT app, or the IDE extension) used in the last 12 hours show up under `folder · Codex app`, read from Codex's `state_N.sqlite`. Only threads you started are shown.
 - **Cowork** sessions show up only when the app keeps their records on your computer (`local-agent-mode-sessions`). Recent Cowork versions keep sessions inside the Cowork virtual machine's disk, so those cannot be shown.
 - **Go to session** brings that terminal or app window to the front. It cannot pick the exact tab.
-- **End session** force-closes the AI program (Windows has no SIGTERM). The terminal tab stays.
+- **End session** force-closes the AI program (Windows has no SIGTERM). The terminal tab stays. An ended session stays off the board even though the Claude or Codex app keeps its record, until you use it again (`~/.spyhop/ended.json`). On a desktop app session with no program running, End session just hides the card the same way.
 - Summaries, AI topic grouping and **Start at login** (a `Spyhop` entry under `HKCU\...\CurrentVersion\Run`) work as on macOS.
 - Not on Windows: Orca, moving sessions, and automatic updates.
 - DeepSeek reads its key from the `DEEPSEEK_API_KEY` environment variable instead of the Keychain.

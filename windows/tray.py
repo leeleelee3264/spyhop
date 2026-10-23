@@ -5,8 +5,14 @@
   오른쪽 클릭 세션 목록. 고르면 그 세션으로 간다
   감시      Claude·Codex 가 떠 있는데 보드가 꺼져 있으면 다시 켠다
 
-  pythonw -X utf8 tray.py                  트레이만 띄운다 (spyhop.cmd 가 부른다)
-  pythonw -X utf8 tray.py --start-board    로그인 때: 보드도 바로 켠다
+  pythonw -X utf8 tray.py                  트레이만 띄운다
+  pythonw -X utf8 tray.py --open-board     보드 창을 연다 (시작 메뉴 · 바탕 화면 아이콘, spyhop.cmd). 트레이가 이미 떠 있으면 그쪽에 전달
+  pythonw -X utf8 tray.py --start-board    로그인 때: 보드도 바로 켠다 (창은 열지 않는다. 맥 앱도 로그인 때는 메뉴바에만)
+  python  -X utf8 tray.py --install        시작 메뉴 · 바탕 화면에 Spyhop 아이콘을 만든다
+  python  -X utf8 tray.py --uninstall      그 아이콘과 로그인 자동 시작을 지운다
+
+보드 창과 패널은 Spyhop 전용 Edge 프로필(%LOCALAPPDATA%\\Spyhop\\window)의 앱 창(주소창 없음)으로 띄운다.
+평소 쓰는 Edge 와 섞이지 않고, 작업 표시줄에도 따로 보인다.
 """
 import ctypes
 import json
@@ -106,6 +112,20 @@ u32.AllowSetForegroundWindow.argtypes = [W.DWORD]
 u32.GetWindowTextW.argtypes = [W.HWND, W.LPWSTR, ctypes.c_int]
 u32.GetWindowRect.argtypes = [W.HWND, ctypes.POINTER(W.RECT)]
 u32.DestroyWindow.argtypes = [W.HWND]
+u32.FindWindowW.restype = W.HWND
+u32.FindWindowW.argtypes = [W.LPCWSTR, W.LPCWSTR]
+u32.keybd_event.argtypes = [W.BYTE, W.BYTE, W.DWORD, ctypes.c_size_t]
+u32.GetWindowPlacement.argtypes = [W.HWND, ctypes.c_void_p]
+u32.MonitorFromPoint.restype = W.HMONITOR
+u32.MonitorFromPoint.argtypes = [W.POINT, W.DWORD]
+u32.MonitorFromRect.restype = W.HMONITOR
+u32.MonitorFromRect.argtypes = [ctypes.POINTER(W.RECT), W.DWORD]
+u32.GetMonitorInfoW.argtypes = [W.HMONITOR, ctypes.c_void_p]
+u32.GetDpiForWindow.argtypes = [W.HWND]
+u32.SetWindowPos.argtypes = [W.HWND, W.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, W.UINT]
+u32.GetForegroundWindow.restype = W.HWND
+u32.AttachThreadInput.argtypes = [W.DWORD, W.DWORD, W.BOOL]
+u32.BringWindowToTop.argtypes = [W.HWND]
 u32.IsWindow.argtypes = [W.HWND]
 u32.IsWindowVisible.argtypes = [W.HWND]
 u32.IsIconic.argtypes = [W.HWND]
@@ -230,46 +250,169 @@ def edge():
     return None
 
 
+# 보드 창 · 패널은 Spyhop 전용 Edge 프로필로 띄운다. 평소 Edge 와 섞이지 않고, 이 프로필의 창만 골라 다시 쓸 수 있다
+APP_PROFILE = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'Spyhop', 'window')
+BOARD_SIZE = (1280, 860)
+PANEL_SIZE = (380, 560)
+WM_OPEN_BOARD = winplat.WM_OPEN_BOARD
+
+
 def edge_windows():
-    """보이는 Edge 최상위 창들. Edge 는 창 여러 개를 한 프로그램이 다 가지고 있어서 창마다 센다."""
-    out = []
+    """Spyhop 전용 프로필로 뜬 Edge 최상위 창들. Edge 는 창 여러 개를 한 프로그램이 다 가지고 있어서 창마다 센다."""
+    out, ours = [], {}
+    key = APP_PROFILE.lower()
 
     def cb(hwnd, _):
         if u32.IsWindowVisible(hwnd) and not u32.GetWindow(hwnd, 4):  # 4 = GW_OWNER
             pid = W.DWORD()
             u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            if os.path.basename(winplat.exe_path(pid.value)).lower() == 'msedge.exe':
+            if pid.value not in ours:
+                ours[pid.value] = (os.path.basename(winplat.exe_path(pid.value)).lower() == 'msedge.exe'
+                                   and key in winplat.command_line(pid.value).lower())
+            if ours[pid.value]:
                 out.append(hwnd)
         return True
     u32.EnumWindows(winplat.WNDENUMPROC(cb), 0)
     return out
 
 
-def bring_front(hwnd):
+def alive(hwnd):
+    return bool(hwnd) and bool(u32.IsWindow(hwnd)) and bool(u32.IsWindowVisible(hwnd))
+
+
+class WINDOWPLACEMENT(ctypes.Structure):
+    _fields_ = [('length', W.UINT), ('flags', W.UINT), ('showCmd', W.UINT), ('ptMinPosition', W.POINT),
+                ('ptMaxPosition', W.POINT), ('rcNormalPosition', W.RECT)]
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [('cbSize', W.DWORD), ('rcMonitor', W.RECT), ('rcWork', W.RECT), ('dwFlags', W.DWORD)]
+
+
+def normal_rect(hwnd):
+    """최소화·최대화 전의 창 자리. 최소화된 창은 GetWindowRect 가 (-32000, -32000) 의 좁은 칸을 돌려줘서 패널로 잘못 본다."""
+    wp = WINDOWPLACEMENT()
+    wp.length = ctypes.sizeof(wp)
+    u32.GetWindowPlacement(hwnd, ctypes.byref(wp))
+    return wp.rcNormalPosition
+
+
+def window_width(hwnd):
+    r = normal_rect(hwnd)
+    return r.right - r.left
+
+
+def work_area():
+    """마우스가 있는 화면(=방금 누른 트레이·시작 메뉴가 있는 화면)의 작업 영역. 실제 픽셀."""
+    pt = W.POINT()
+    u32.GetCursorPos(ctypes.byref(pt))
+    mon = u32.MonitorFromPoint(pt, 2)  # MONITOR_DEFAULTTONEAREST
+    mi = MONITORINFO()
+    mi.cbSize = ctypes.sizeof(mi)
+    u32.GetMonitorInfoW(mon, ctypes.byref(mi))
+    return mi.rcWork
+
+
+def scaled(hwnd, size):
+    """Edge 가 쓰는 단위(배율 적용 전)의 크기를 그 창 화면의 실제 픽셀로. 배율 150% 면 380 → 570."""
+    dpi = u32.GetDpiForWindow(hwnd) or 96
+    return tuple(int(v * dpi / 96) for v in size)
+
+
+def panel_rect(hwnd):
+    w, h = scaled(hwnd, PANEL_SIZE)
+    work, gap = work_area(), scaled(hwnd, (12, 12))[0]
+    return work.right - w - gap, work.bottom - h - gap, w, h
+
+
+def board_rect(hwnd):
+    w, h = scaled(hwnd, BOARD_SIZE)
+    work = work_area()
+    w, h = min(w, int((work.right - work.left) * .92)), min(h, int((work.bottom - work.top) * .92))
+    return work.left + (work.right - work.left - w) // 2, work.top + (work.bottom - work.top - h) // 2, w, h
+
+
+PANEL_TITLE = 'Spyhop panel'  # panel.html 의 <title>. 보드는 'Spyhop'
+
+
+def window_title(hwnd):
+    buf = ctypes.create_unicode_buffer(256)
+    u32.GetWindowTextW(hwnd, buf, 256)
+    return buf.value
+
+
+def is_panel(hwnd):
+    """패널 창인가. 페이지를 다 읽기 전에는 제목 자리에 주소가 보인다."""
+    t = window_title(hwnd)
+    return t == PANEL_TITLE or '/panel' in t
+
+
+def too_small(hwnd):
+    """보드 창이 보드로 쓰기에 너무 작은가 (보드 크기의 절반 폭보다 좁다)."""
+    return window_width(hwnd) < scaled(hwnd, (BOARD_SIZE[0] // 2, 0))[0]
+
+
+def off_screen(hwnd):
+    r = normal_rect(hwnd)
+    return not u32.MonitorFromRect(ctypes.byref(r), 0)  # MONITOR_DEFAULTTONULL: 어느 화면에도 안 걸친다
+
+
+def bring_front(hwnd, rect=None):
+    """창을 보이게 하고 맨 앞으로. rect=(x, y, w, h, 실제 픽셀)를 주면 그 자리로 옮긴다.
+    트레이는 백그라운드 프로그램이라 Windows 가 다른 창을 앞으로 올리지 못하게 막는다. 지금 맨 앞 창의 입력 줄에
+    잠깐 붙어서(AttachThreadInput) 올리고, Alt 를 한 번 눌렀다 떼서(그래야 허용된다) 한 번 더 시도한다."""
     if u32.IsIconic(hwnd):
         u32.ShowWindow(hwnd, 9)  # SW_RESTORE
-    u32.SetForegroundWindow(hwnd)
+    else:
+        u32.ShowWindow(hwnd, 5)  # SW_SHOW
+    if rect:
+        u32.SetWindowPos(hwnd, None, rect[0], rect[1], rect[2], rect[3], 0x0004 | 0x0010)  # NOZORDER | NOACTIVATE
+    fg = u32.GetForegroundWindow()
+    mine, theirs = k32.GetCurrentThreadId(), u32.GetWindowThreadProcessId(fg, None) if fg else 0
+    attached = bool(theirs and theirs != mine and u32.AttachThreadInput(mine, theirs, True))
+    try:
+        u32.keybd_event(0x12, 0, 0, 0)
+        u32.keybd_event(0x12, 0, 2, 0)
+        u32.BringWindowToTop(hwnd)
+        u32.SetForegroundWindow(hwnd)
+    finally:
+        if attached:
+            u32.AttachThreadInput(mine, theirs, False)
+    return u32.GetForegroundWindow() == hwnd
 
 
-def launch_panel():
-    """작은 보드 패널을 오른쪽 아래(트레이 옆)에 연다. 새로 생긴 패널 창(없으면 None)을 돌려준다."""
+def launch_window(url, size):
+    """전용 프로필의 앱 창(주소창 없음)을 연다. 새로 생긴 창(없으면 None)을 돌려준다. Edge 가 없으면 기본 브라우저로.
+    자리는 띄운 뒤 트레이가 실제 픽셀로 옮긴다: Edge 의 --window-position 은 배율 적용 전 단위라, 실제 픽셀을 넘기면
+    배율 150% 화면에서 1.5배 오른쪽, 즉 화면 밖에 뜬다(실제로 겪음)."""
     exe = edge()
     if not exe:
-        os.startfile(PANEL_URL)
+        os.startfile(url)
         return None
+    os.makedirs(APP_PROFILE, exist_ok=True)
     before = set(edge_windows())
-    work = W.RECT()
-    u32.SystemParametersInfoW(0x30, 0, ctypes.byref(work), 0)  # SPI_GETWORKAREA
-    w, h = 380, 560
-    subprocess.Popen([exe, '--app=' + PANEL_URL, '--window-size=%d,%d' % (w, h),
-                      '--window-position=%d,%d' % (max(0, work.right - w - 12), max(0, work.bottom - h - 12))],
-                     creationflags=winplat.CREATE_NO_WINDOW)
-    for _ in range(40):  # 창이 뜰 때까지 최대 4초
+    u32.AllowSetForegroundWindow(0xFFFFFFFF)  # ASFW_ANY: 새 창이 앞으로 나올 수 있게
+    subprocess.Popen([exe, '--user-data-dir=' + APP_PROFILE, '--no-first-run', '--no-default-browser-check',
+                      '--app=' + url, '--window-size=%d,%d' % size], creationflags=winplat.CREATE_NO_WINDOW)
+    for _ in range(60):  # 창이 뜰 때까지 최대 6초 (전용 프로필을 처음 만들 때 조금 걸린다)
         time.sleep(.1)
         new = [x for x in edge_windows() if x not in before]
         if new:
+            time.sleep(.3)  # Edge 가 지난번 자리를 먼저 되살린 뒤에 옮긴다
             return new[0]
     return None
+
+
+def server_up(timeout=0.3):
+    import socket
+    try:
+        socket.create_connection(('127.0.0.1', PORT), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
+ask_tray_to_open_board = winplat.ask_tray_to_open_board
 
 
 def go(handle):
@@ -295,6 +438,7 @@ class Tray:
         self.sessions = []
         self.ensured = 0
         self.panel = None  # 트레이가 연 패널 창. 다시 누르면 새로 열지 않고 이 창을 앞으로
+        self.board = None  # 트레이가 연 보드 창. 마찬가지
         self.nid = NOTIFYICONDATAW()
         self.nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
         self.nid.hWnd = self.hwnd
@@ -326,11 +470,40 @@ class Tray:
         if old:
             u32.DestroyIcon(old)
 
+    def find(self, attr, panel):
+        """기억한 창이 살아 있으면 그것, 아니면(트레이를 다시 띄운 경우) 전용 프로필 창 중 제목으로 고른 것.
+        크기로 고르면 안 된다: 배율 150% 에서 패널은 570px 이고, 작게 뜬 보드 창도 그만할 수 있다(실제로 헷갈렸다)."""
+        hwnd = getattr(self, attr)
+        if alive(hwnd):
+            return hwnd
+        hwnd = next((x for x in edge_windows() if is_panel(x) == panel), None)
+        setattr(self, attr, hwnd)
+        return hwnd
+
     def open_panel(self):
-        if self.panel and u32.IsWindow(self.panel) and u32.IsWindowVisible(self.panel):
-            bring_front(self.panel)
+        """작은 보드 패널을 오른쪽 아래(트레이 옆)에. 이미 열려 있으면 그 자리로 앞으로."""
+        hwnd = self.find('panel', panel=True) or launch_window(PANEL_URL, PANEL_SIZE)
+        self.panel = hwnd
+        if hwnd:
+            bring_front(hwnd, panel_rect(hwnd))
+
+    def open_board(self):
+        """보드 창을 연다. 이미 열려 있으면 앞으로. 보드가 꺼져 있으면 켜고 뜰 때까지 기다린다 (사람이 보드를 열면 켠다, 맥 앱과 같게).
+        새로 연 창은 늘 보드 크기로 맞춘다(Edge 는 같은 프로필의 앱 창 크기를 되살려서 패널만 하게 뜰 수 있다).
+        이미 열린 창은 사용자가 정한 크기를 두되, 화면 밖이거나 너무 작으면 맞춘다."""
+        hwnd = self.find('board', panel=False)
+        if hwnd:
+            bring_front(hwnd, board_rect(hwnd) if off_screen(hwnd) or too_small(hwnd) else None)
             return
-        self.panel = launch_panel()
+        if not server_up():
+            start_board()
+            for _ in range(50):  # 최대 10초
+                if server_up():
+                    break
+                time.sleep(.2)
+        hwnd = self.board = launch_window(BOARD_URL, BOARD_SIZE)
+        if hwnd:
+            bring_front(hwnd, board_rect(hwnd))
 
     def menu(self):
         up, ss = read_state()
@@ -356,6 +529,7 @@ class Tray:
         else:
             u32.AppendMenuW(m, MF_STRING | MF_GRAYED, 0, 'Board is off · starts when Claude or Codex runs')
             u32.AppendMenuW(m, MF_STRING, ID_START, 'Start the board now')
+            u32.AppendMenuW(m, MF_STRING, ID_OPEN_BOARD, 'Open board')
         u32.AppendMenuW(m, MF_SEPARATOR, 0, None)
         u32.AppendMenuW(m, MF_STRING, ID_QUIT, 'Hide tray icon')
         pt = W.POINT()
@@ -369,7 +543,7 @@ class Tray:
         elif cmd == ID_OPEN_PANEL:
             self.open_panel()
         elif cmd == ID_OPEN_BOARD:
-            os.startfile(BOARD_URL)
+            self.open_board()
         elif cmd == ID_START:
             start_board()
         elif cmd == ID_QUIT:
@@ -388,6 +562,9 @@ class Tray:
                 return 0
             if msg == WM_TIMER:
                 self.refresh()
+                return 0
+            if msg == WM_OPEN_BOARD:
+                self.open_board()
                 return 0
             if msg == self.taskbar_created:
                 self.refresh(add=True)
@@ -408,18 +585,47 @@ class Tray:
             u32.DispatchMessageW(ctypes.byref(msg))
 
 
+def install():
+    """시작 메뉴 · 바탕 화면에 Spyhop 아이콘. 누르면 보드 창이 뜬다 (트레이도 같이)."""
+    made = winplat.make_shortcuts('Spyhop', winplat.windowed_python(),
+                                  '-X utf8 "%s" --open-board' % os.path.join(HERE, 'tray.py'),
+                                  os.path.join(HERE, 'spyhop.ico'), HERE,
+                                  'Every AI coding session on one board')
+    for p in made:
+        print('made: %s' % p)
+
+
+def uninstall():
+    for p in winplat.remove_shortcuts('Spyhop'):
+        print('removed: %s' % p)
+    B.set_autostart(False)
+    print('Start at login: off')
+
+
 def main():
-    # 트레이는 하나만 (spyhop.cmd 를 여러 번 눌러도)
-    k32.CreateMutexW(None, False, 'Local\\SpyhopTray')
-    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
-        return
+    if '--install' in sys.argv:
+        return install()
+    if '--uninstall' in sys.argv:
+        return uninstall()
     try:
         u32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # PER_MONITOR_AWARE_V2: 아이콘이 흐리지 않게
     except (AttributeError, OSError):
         pass
+    # 트레이는 하나만 (아이콘을 여러 번 눌러도). 이미 떠 있으면 보드 창 열기만 그쪽에 전하고 끝낸다
+    k32.CreateMutexW(None, False, 'Local\\SpyhopTray')
+    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+        if '--open-board' in sys.argv:
+            for _ in range(30):  # 막 뜨는 중인 트레이면 창이 생길 때까지 잠깐 기다린다
+                if ask_tray_to_open_board():
+                    break
+                time.sleep(.1)
+        return
     if '--start-board' in sys.argv and not B.watching():
         start_board()
-    Tray().run()
+    tray = Tray()
+    if '--open-board' in sys.argv:
+        u32.PostMessageW(tray.hwnd, WM_OPEN_BOARD, 0, 0)  # 트레이를 띄운 뒤 메시지 처리 중에 연다
+    tray.run()
 
 
 if __name__ == '__main__':

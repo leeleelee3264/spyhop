@@ -20,7 +20,7 @@ class AppSessionsTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.app = self.root / 'Claude'
         self.home = self.root / 'home'
-        self.env = patch.multiple(B, CLAUDE_APP_DIR=str(self.app))
+        self.env = patch.multiple(B, CLAUDE_APP_DIR=str(self.app), ENDED_FILE=str(self.root / 'ended.json'))
         self.env.start()
         self.user = patch.dict(os.environ, {'HOME': str(self.home), 'USERPROFILE': str(self.home)})
         self.user.start()
@@ -134,6 +134,27 @@ class AppSessionsTest(unittest.TestCase):
         home = self.codex_db([('t-user', 'vscode', 'user', 'Codex Desktop', 0, 60, False)])
         self.assertEqual(B.codex_app_sessions(live_ids={'rollout-x-t-user'}, now=NOW, home=home), [])
         self.assertEqual(B.codex_app_sessions(now=NOW, home=str(self.root / 'no-codex')), [])
+
+    def test_session_ended_on_the_board_stays_off_until_used_again(self):
+        self.code('aaaa1111', 'cli-ended', '/w/automation')
+        log = self.home / '.claude' / 'projects' / 'p' / 'cli-ended.jsonl'
+        os.utime(log, (NOW - 120, NOW - 120))
+        B.mark_ended(str(log), now=NOW - 60)
+        self.assertEqual(B.app_sessions(now=NOW), [])  # 끝낸 뒤 새 대화가 없다
+        os.utime(log, (NOW - 60 + B.ENDED_GRACE + 5, NOW - 60 + B.ENDED_GRACE + 5))  # 앱에서 다시 썼다
+        self.assertEqual([s['cli'] for s in B.app_sessions(now=NOW)], ['cli-ended'])
+
+    def test_codex_thread_ended_on_the_board_stays_off(self):
+        home = self.codex_db([('t-user', 'vscode', 'user', 'Codex Desktop', 0, 60, False)])
+        log = os.path.join(home, 'sessions', 'rollout-x-t-user.jsonl')
+        os.utime(log, (NOW - 120, NOW - 120))
+        B.mark_ended(log, now=NOW - 60)
+        self.assertEqual(B.codex_app_sessions(now=NOW, home=home), [])
+
+    def test_ended_list_forgets_old_entries(self):
+        B.mark_ended('/x/old.jsonl', now=NOW - B.APP_RECENT - 2 * 86400)
+        B.mark_ended('/x/new.jsonl', now=NOW)
+        self.assertEqual(set(B.load_ended()), {'new'})
 
     def test_broken_records_are_skipped(self):
         bad = self.app / 'claude-code-sessions' / 'acct' / 'org' / 'local_bad.json'

@@ -124,6 +124,34 @@ class WinPlatTest(unittest.TestCase):
         self.assertEqual(T.waited(time.time()), 'now')
         self.assertEqual(T.waited(time.time() - 300), '5m')
 
+    def test_app_icon_is_built_from_the_mac_icon(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+        import make_icon
+        out = self.root / 'spyhop.ico'
+        sizes = make_icon.build(ico_path=str(out))
+        self.assertEqual(sizes, [16, 32, 64, 128, 256])
+        data = out.read_bytes()
+        self.assertEqual(data[:6], b'\x00\x00\x01\x00\x05\x00')  # ICO, 이미지 5개
+        self.assertEqual(data[6], 16)  # 첫 항목은 16px
+        # 저장소에 들어 있는 아이콘이 맥 아이콘에서 다시 만든 것과 같아야 한다 (맥 아이콘이 바뀌면 다시 만들 것)
+        self.assertEqual((Path(__file__).resolve().parents[1] / 'spyhop.ico').read_bytes(), data)
+
+    def test_shortcuts_are_made_and_removed(self):
+        folder = str(self.root / 'menu')
+        os.makedirs(folder)
+        made = W.make_shortcuts('Spyhop Test', sys.executable, '-c "pass"', str(self.root / 'x.ico'), str(self.root),
+                                'test', places=(folder,))
+        self.assertEqual([os.path.normcase(p) for p in made], [os.path.normcase(os.path.join(folder, 'Spyhop Test.lnk'))])
+        self.assertTrue(os.path.exists(made[0]))
+        self.assertEqual(len(W.remove_shortcuts('Spyhop Test', places=(folder,))), 1)
+        self.assertFalse(os.path.exists(made[0]))
+
+    def test_app_window_uses_its_own_edge_profile(self):
+        import tray as T
+        self.assertTrue(T.APP_PROFILE.lower().startswith(os.environ['LOCALAPPDATA'].lower()))
+        self.assertIsInstance(T.edge_windows(), list)  # 평소 Edge 창은 세지 않는다
+        self.assertEqual(T.WM_OPEN_BOARD, W.WM_OPEN_BOARD)
+
     def test_process_rows_include_this_python(self):
         rows = {r[0]: r for r in W.process_rows()}
         self.assertIn(os.getpid(), rows)
