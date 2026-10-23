@@ -1105,6 +1105,42 @@ def _osa(script, want=None):
     return r.returncode == 0 and (want is None or r.stdout.strip() == want)
 
 
+_WEZTERM_FOCUS_LOCK = threading.Lock()
+
+
+def _wezterm_raise(wz, pane):
+    """탭 이름 대신 실제 창 제목으로 찾고, 중복이면 해당 tty에만 임시 표식을 쓴다."""
+    def raise_title(title):
+        script = ('tell application "System Events" to tell process "WezTerm"\n'
+                  'repeat 10 times\nset targets to every window whose name ends with %s\n'
+                  'if (count targets) is 1 then\nset frontmost to true\n'
+                  'perform action "AXRaise" of item 1 of targets\nreturn "ok"\nend if\n'
+                  'delay 0.05\nend repeat\nreturn "ambiguous"\nend tell') % json.dumps(title, ensure_ascii=False)
+        return _osa(script, 'ok')
+
+    title = pane.get('title')
+    if not isinstance(title, str) or any(ord(c) < 32 or 127 <= ord(c) < 160 for c in title):
+        return False  # 복원할 제목에 터미널 제어 문자가 섞이면 쓰지 않는다
+    if title and raise_title(title):
+        return True
+    marker = 'Spyhop-focus-' + os.urandom(8).hex()
+    try:
+        fd = os.open(pane['tty_name'], os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
+        try:
+            os.write(fd, ('\x1b]2;' + marker + '\x07').encode())
+            return raise_title(marker)
+        finally:
+            try:
+                os.write(fd, ('\x1b]2;' + title + '\x07').encode())
+                if 'window_title' in pane and pane['window_title'] != title:
+                    subprocess.run([wz, 'cli', 'set-window-title', '--pane-id', str(pane['pane_id']), pane['window_title']],
+                                   capture_output=True, timeout=5, check=True)
+            finally:
+                os.close(fd)
+    except (OSError, KeyError, subprocess.SubprocessError):
+        return False
+
+
 def focus_outside(pid):
     """오르카 밖 세션의 창을 앞으로. 터미널마다 방법이 다르다(tty 로 찾는다).
     'tab' = 그 탭까지 갔다, 'app' = 탭은 못 찾고 앱만 앞으로, '' = 못 했다"""
@@ -1128,27 +1164,21 @@ def focus_outside(pid):
                     'select window id wid\nreturn "ok"\nend if\n'
                     'end repeat\nend repeat\nend repeat\nend tell' % tty, 'ok') and 'tab' or app('iTerm')
     if tp == 'WezTerm':
-        wz = find_bin('wezterm') or '/Applications/WezTerm.app/Contents/MacOS/wezterm'
-        try:
-            panes = json.loads(subprocess.run([wz, 'cli', 'list', '--format', 'json'], capture_output=True, text=True, timeout=5).stdout or '[]')
-            pane = next((p for p in panes if p.get('tty_name') == tty), None)
-            ok = bool(pane) and subprocess.run([wz, 'cli', 'activate-pane', '--pane-id', str(pane['pane_id'])],
-                                               capture_output=True, timeout=5).returncode == 0
-            if ok:
+        with _WEZTERM_FOCUS_LOCK:  # 동시에 누른 이동이 임시 제목과 탭 선택을 서로 덮지 않게 한다
+            wz = find_bin('wezterm') or '/Applications/WezTerm.app/Contents/MacOS/wezterm'
+            try:
                 panes = json.loads(subprocess.run([wz, 'cli', 'list', '--format', 'json'], capture_output=True, text=True, timeout=5).stdout or '[]')
-                pane = next(p for p in panes if p.get('tty_name') == tty)
-        except (OSError, ValueError, StopIteration, subprocess.SubprocessError):
-            ok = False
-        if ok:
-            # pane 선택은 창을 올리지 않는다. 고유한 창 제목으로 해당 창만 앞으로 가져온다.
-            title = pane.get('tab_title') or pane.get('title') or pane.get('window_title')
-            if title:
-                script = ('tell application "System Events" to tell process "WezTerm"\n'
-                          'set targets to every window whose name ends with %s\nif (count targets) is not 1 then return "ambiguous"\n'
-                          'set frontmost to true\nperform action "AXRaise" of item 1 of targets\nreturn "ok"\nend tell') % json.dumps(title, ensure_ascii=False)
-                if _osa(script, 'ok'):
-                    return 'tab'
-        return app('WezTerm')
+                pane = next((p for p in panes if p.get('tty_name') == tty), None)
+                ok = bool(pane) and subprocess.run([wz, 'cli', 'activate-pane', '--pane-id', str(pane['pane_id'])],
+                                                   capture_output=True, timeout=5).returncode == 0
+                if ok:
+                    panes = json.loads(subprocess.run([wz, 'cli', 'list', '--format', 'json'], capture_output=True, text=True, timeout=5).stdout or '[]')
+                    pane = next(p for p in panes if p.get('tty_name') == tty)
+            except (OSError, ValueError, StopIteration, subprocess.SubprocessError):
+                ok = False
+            if ok and _wezterm_raise(wz, pane) and _open_app('WezTerm'):
+                return 'tab'
+            return app('WezTerm')
     if tp == 'ghostty':
         return 'tab' if _ghostty_focus(a) else app('Ghostty')
     name = {'vscode': 'Visual Studio Code', 'WarpTerminal': 'Warp'}.get(tp)
