@@ -6,7 +6,7 @@ Reference for things the README doesn't need to say.
 
 | | |
 |---|---|
-| What | A local web board of every Claude Code / Codex session running on this Mac (in Orca, Terminal, iTerm2, Ghostty, WezTerm or any terminal), each shown as its own progress (done · now · next steps) |
+| What | A local web board of every Claude Code / Codex session running on this Mac (in Orca, Terminal, iTerm2, Ghostty, WezTerm, cmux or any terminal), each shown as its own progress (done · now · next steps) |
 | Platform | macOS, Python 3.9+ (standard library only, no `pip install`) |
 | Needs | one summarizer: `claude` or `codex` logged in, or a DeepSeek API key. The `orca` CLI is optional (adds workspace columns, moving and helper lines) |
 | DeepSeek (optional) | Faster summaries (about 6 s per session). Store a key once: `security add-generic-password -s deepseek-api -a "$USER" -w '<key>'` |
@@ -82,3 +82,9 @@ Inside a board folder:
 | `orca_art.py` | Orca icon and animation art |
 | `tools/demo_screens.py` | Regenerates the screenshots in `docs/screenshots` from demo data |
 | `spyhop`, `menubar/spyhop.5s.py` | Brew command and SwiftBar plugin (`legacy/mac-browser/` only) |
+
+### cmux socket access
+
+Spyhop runs outside the cmux process tree. Select **Automation mode** under cmux **Settings → Automation → Socket Control Mode** to allow local automation from the same macOS user. The default **cmux processes only** mode rejects these commands; **Full open access** is unnecessary. Sessions can still be listed when socket access is denied, but Go to session can only bring cmux forward.
+
+If `cmux ping` still reports access denied after changing the mode, restart cmux and retry. On cmux 0.64.4, the live listener kept enforcing the old mode until the app was restarted.

@@ -791,6 +791,9 @@ import datetime
 _PROC_CACHE = {'at': 0, 'data': None}
 
 
+_PS_ENV = dict(os.environ, LC_ALL='C')  # 한국어 로캘이면 lstart 가 4칸으로 나와 줄이 깨진다
+
+
 def _ps_start(tokens):
     """ps lstart 토큰 5개(예: Wed Oct  7 15:06:54 2026, 이 맥의 현지 시각) → epoch"""
     try:
@@ -802,7 +805,7 @@ def _ps_start(tokens):
 def _agent_rows():
     """(pid, ppid, tty, start, comm) — 가볍게 2초마다 불러도 되는 목록"""
     try:
-        out = subprocess.run(['ps', '-axo', 'pid=,ppid=,tty=,lstart=,comm='], capture_output=True, text=True, timeout=5).stdout
+        out = subprocess.run(['ps', '-axo', 'pid=,ppid=,tty=,lstart=,comm='], capture_output=True, text=True, timeout=5, env=_PS_ENV).stdout
     except (OSError, subprocess.SubprocessError):
         return []
     rows = []
@@ -992,10 +995,10 @@ def agent_procs():
         a = agents[int(p[0])]
         if a['kind'] == 'claude' and re.search(r'(?:^| )CLAUDE_CODE_CHILD_SESSION=1(?: |$)', p[1]):
             a['child'] = True
-        for key in ('ORCA_PANE_KEY', 'CODEX_HOME', 'TERM_PROGRAM'):  # CODEX_HOME 이 다르면 그 폴더의 색인을 읽는다
+        for key in ('ORCA_PANE_KEY', 'CODEX_HOME', 'TERM_PROGRAM', 'CMUX_WORKSPACE_ID', 'CMUX_PANEL_ID', 'CMUX_SURFACE_ID'):  # CODEX_HOME 이 다르면 그 폴더의 색인을 읽는다
             m = re.search(r'(?:^| )%s=(\S+)' % key, p[1])
             a[key.lower()] = m.group(1) if m else None
-        if a.get('term_program') not in (None, 'Orca', 'tmux'):
+        if _term_label(a) == 'cmux' or a.get('term_program') not in (None, 'Orca', 'tmux'):
             a['orca_pane_key'] = None  # 오르카에서 띄운 다른 터미널은 오르카 표식을 물려받는다 → 그 터미널 세션으로 본다
     for pid, paths in _by_pid(_lsof(list(agents), ['-a', '-d', 'cwd'])).items():
         if pid in agents and paths:
@@ -1069,9 +1072,16 @@ def agent_procs():
 
 
 
-# ---------- 오르카 밖 터미널 (iTerm2 · 터미널 · Ghostty · WezTerm …) ----------
+# ---------- 오르카 밖 터미널 (iTerm2 · 터미널 · Ghostty · WezTerm · cmux …) ----------
 TERM_LABEL = {'Apple_Terminal': 'Terminal', 'iTerm.app': 'iTerm2', 'WezTerm': 'WezTerm', 'ghostty': 'Ghostty',
               'vscode': 'VS Code', 'tmux': 'tmux', 'WarpTerminal': 'Warp', 'Hyper': 'Hyper', 'kitty': 'kitty', 'alacritty': 'Alacritty'}
+
+
+def _term_label(a):
+    tp = a.get('term_program') or ''
+    if (a.get('cmux_panel_id') or a.get('cmux_surface_id')) and tp in ('', 'ghostty', 'cmux'):
+        return 'cmux'  # cmux는 버전에 따라 ghostty 표식 또는 터미널 표식 없이 실행된다
+    return TERM_LABEL.get(tp, tp or 'Terminal')
 
 
 def outside_terms():
@@ -1081,7 +1091,7 @@ def outside_terms():
         if a.get('orca_pane_key') or a.get('tty') in (None, '??'):
             continue  # 오르카 창이거나, 화면 없는 프로그램(서버·백그라운드)
         cwd = a.get('cwd') or ''
-        label = TERM_LABEL.get(a.get('term_program') or '', a.get('term_program') or 'Terminal')
+        label = _term_label(a)
         wid = 'term:%s:%s' % (label, cwd)
         wts[wid] = {'id': wid, 'displayName': '%s · %s' % (os.path.basename(cwd) or cwd, label), 'path': cwd, 'sortOrder': -1}
         try:
@@ -1106,7 +1116,7 @@ def _osa(script, want=None):
 
 
 def focus_outside(pid):
-    """오르카 밖 세션의 창을 앞으로. 터미널마다 방법이 다르다(tty 로 찾는다).
+    """오르카 밖 세션의 창을 앞으로. 터미널마다 방법이 다르다(tty, cmux 는 패널 ID 로 찾는다).
     'tab' = 그 탭까지 갔다, 'app' = 탭은 못 찾고 앱만 앞으로, '' = 못 했다"""
     a = agent_procs().get(pid)
     if not a:
@@ -1149,6 +1159,8 @@ def focus_outside(pid):
                 if _osa(script, 'ok'):
                     return 'tab'
         return app('WezTerm')
+    if _term_label(a) == 'cmux':
+        return 'tab' if _cmux_focus(a) else app('cmux')
     if tp == 'ghostty':
         return 'tab' if _ghostty_focus(a) else app('Ghostty')
     name = {'vscode': 'Visual Studio Code', 'WarpTerminal': 'Warp'}.get(tp)
@@ -1187,6 +1199,20 @@ def _ghostty_focus(a):
         return False
     return _osa('tell application "Ghostty"\nrepeat with w in windows\nrepeat with t in tabs of w\nrepeat with s in terminals of t\n'
                 'if id of s is "%s" then\nfocus s\nreturn "ok"\nend if\nend repeat\nend repeat\nend repeat\nend tell' % pick[0], 'ok')
+
+
+def _cmux_focus(a):
+    """cmux 는 tty 대신 작업 공간·패널 ID 로 칸을 찾는다."""
+    panel = a.get('cmux_surface_id') or a.get('cmux_panel_id')
+    if not (a.get('cmux_workspace_id') and panel):
+        return False
+    cmux = find_bin('cmux') or '/Applications/cmux.app/Contents/Resources/bin/cmux'
+    cmd = [cmux, 'focus-panel', '--panel', panel, '--workspace', a['cmux_workspace_id']]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and (r.stdout or '').startswith('OK') and _open_app('cmux')
 
 
 def _open_app(name):
@@ -2978,7 +3004,7 @@ def watcher_record(pidfile=None):
         if pid <= 0 or os.path.basename(path) != 'board.py':
             return None
         p = subprocess.run(['ps', '-p', str(pid), '-o', 'lstart=,comm='],
-                           capture_output=True, text=True, timeout=5).stdout.split(None, 5)
+                           capture_output=True, text=True, timeout=5, env=_PS_ENV).stdout.split(None, 5)
         if len(p) != 6 or not os.path.basename(p[5].strip()).lower().startswith('python'):
             return None
         start = _ps_start(p[:5])
@@ -3329,7 +3355,7 @@ def doctor(argv):
     # 2) 오르카
     ob = find_bin('orca')
     if not ob:
-        say('  orca:          not found. Orca panes are not shown; sessions in Terminal, iTerm2, Ghostty and WezTerm still are')
+        say('  orca:          not found. Orca panes are not shown; sessions in Terminal, iTerm2, Ghostty, WezTerm and cmux still are')
     else:
         try:
             ok = subprocess.run([ob, 'status', '--json'], capture_output=True, text=True, timeout=10).returncode == 0
@@ -3392,7 +3418,7 @@ def doctor(argv):
             if o in ('card', 'card-new-session') and e.get('terminal'):
                 term = e['terminal']
                 say('        · runs in %s (Go to session: %s)' % (term, 'exact pane' if term == 'Orca' else
-                    'exact tab' if term in ('Terminal', 'iTerm2', 'Ghostty', 'WezTerm') else 'brings the app to the front only'))
+                    'exact tab' if term in ('Terminal', 'iTerm2', 'Ghostty', 'WezTerm', 'cmux') else 'brings the app to the front only'))
             if o in ('helper', 'helper-older-hidden'):
                 say('        · under the card of %s%s (a card shows one helper: a working one first, else the newest)' % ((e.get('parent') or '?')[:13],
                     (', started by helper %s' % e['via'][:13]) if e.get('via') else ''))

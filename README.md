@@ -18,7 +18,7 @@
   <img alt="Codex" src="https://img.shields.io/badge/Codex-supported-1e293b">
   <img alt="OMP" src="https://img.shields.io/badge/OMP-supported-1e293b">
   <img alt="Orca" src="https://img.shields.io/badge/Orca-optional-1e293b">
-  <img alt="Terminals" src="https://img.shields.io/badge/Terminal%20%C2%B7%20iTerm2%20%C2%B7%20Ghostty%20%C2%B7%20WezTerm-supported-1e293b">
+  <img alt="Terminals" src="https://img.shields.io/badge/Terminal%20%C2%B7%20iTerm2%20%C2%B7%20Ghostty%20%C2%B7%20WezTerm%20%C2%B7%20cmux-supported-1e293b">
 </p>
 
 ![Board](docs/screenshots/board.png)
@@ -43,7 +43,7 @@ You need macOS 13 or later, Homebrew, the Xcode Command Line Tools (`xcode-selec
    ```
 
 2. The board opens in its own window, and the orca in the menu bar shows how many sessions are waiting for you.
-3. Start or keep a Claude Code or Codex session running anywhere (Orca, Terminal, iTerm2, Ghostty, WezTerm). It shows up as a card within a few seconds, and its steps fill in once the first summary is done.
+3. Start or keep a Claude Code or Codex session running anywhere (Orca, Terminal, iTerm2, Ghostty, WezTerm, cmux). It shows up as a card within a few seconds, and its steps fill in once the first summary is done.
 4. Click a card to see every step, the last reply and its TODO list. **Go to session** jumps to that pane or tab.
 
 Closing the window keeps the orca in the menu bar; **Start at login** in Settings opens it there at login.
@@ -108,7 +108,7 @@ brew uninstall --cask spyhop && rm -rf ~/.spyhop
 
 ### What works where
 
-| | Orca | Terminal, iTerm2, Ghostty, WezTerm | Other terminals |
+| | Orca | Terminal, iTerm2, Ghostty, WezTerm, cmux | Other terminals |
 |---|---|---|---|
 | Card, steps, summary, detail view | ✅ | ✅ | ✅ |
 | Columns (Group by: Location) | Orca workspaces | folder and terminal (e.g. `workspace · iTerm2`) | folder and terminal |
@@ -118,6 +118,8 @@ brew uninstall --cask spyhop && rm -rf ~/.spyhop
 | Cross-check line under a card (panes started through Orca) | ✅ | ❌ | ❌ |
 | AI topic grouping | ✅ | ✅ | ✅ |
 | Doctor (`board.py --doctor`) | ✅ | ✅ | ✅ |
+
+cmux: in **Settings → Automation → Socket Control Mode**, select **Automation mode** so Spyhop can focus sessions from outside cmux. The default **cmux processes only** mode rejects external clients. **Full open access** is not needed. If the CLI still rejects access after changing this setting, restart cmux.
 
 ### On the board
 
@@ -149,7 +151,7 @@ More on timing, privacy and internals: [docs/details.md](docs/details.md).
 
 ## Roadmap
 
-- [x] Work without Orca: sessions in Terminal, iTerm2, Ghostty and WezTerm, grouped by folder and terminal.
+- [x] Work without Orca: sessions in Terminal, iTerm2, Ghostty, WezTerm and cmux, grouped by folder and terminal.
 - [x] A doctor (`board.py --doctor`) to explain missing or wrong cards.
 - [ ] A "reset groups" button for AI topics.
 - [ ] Moving a session to another workspace, made safe end to end.
