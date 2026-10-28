@@ -321,8 +321,10 @@ def agent_kind(t):
     title = t.get('title') or ''
     if title.startswith(('π ', '⌥ ')):
         return 'omp'
+    if title.endswith(' - GitHub Copilot'):
+        return 'copilot'
     kind = (t.get('agent') or {}).get('agentType')
-    if kind in ('claude', 'codex', 'omp'):
+    if kind in ('claude', 'codex', 'omp', 'copilot'):
         return kind
     head = title[:1]
     if head in CLAUDE_MARKS:  # 클로드 코드만 쓰는 기호(✳ 쉬는 중, ✶✻ 등 일하는 중)
@@ -488,7 +490,8 @@ def transcript(path, start=0):
         for raw in fh:
             if not raw.endswith(b'\n'):
                 break  # 끝이 안 난 마지막 줄은 다음 번에 읽는다
-            if b'"user"' not in raw and b'"assistant"' not in raw and b'"message"' not in raw:
+            if b'"user"' not in raw and b'"assistant"' not in raw and b'"message"' not in raw \
+                    and not raw.startswith((b'{"type":"user.message"', b'{"type":"assistant.message"')):
                 continue  # 도구 결과·메타 줄은 풀어 보지 않는다
             try:
                 d = json.loads(raw)
@@ -502,6 +505,8 @@ def transcript(path, start=0):
             elif d.get('type') == 'message':  # OMP
                 m = d.get('message', {})
                 role, text = m.get('role'), text_of(m.get('content'))
+            elif d.get('type') in ('user.message', 'assistant.message'):  # Copilot
+                role, text = d['type'].split('.')[0], text_of((d.get('data') or {}).get('content'))
             else:
                 continue
             text = text.strip()
@@ -825,13 +830,79 @@ def _agent_rows():
 
 
 def proc_kind(comm):
-    """실행 파일 경로 → 'claude' / 'codex' / None. 클로드 설치판은 실행 파일 이름이 버전 번호일 수 있다 (…/claude/versions/2.1.296)"""
+    """실행 파일 경로 → 'claude' / 'codex' / 'copilot' / None. 클로드 설치판은 실행 파일 이름이 버전 번호일 수 있다 (…/claude/versions/2.1.296)"""
     base = os.path.basename(comm)
-    if base in ('claude', 'codex'):
+    if base in ('claude', 'codex', 'copilot'):
         return base
     if re.search(r'/claude/versions/\d[\w.-]*$', comm):
         return 'claude'
     return None
+
+
+COPILOT_HOME = os.path.expanduser('~/.copilot')
+COPILOT_LINKS = os.path.expanduser('~/.spyhop/copilot')
+
+
+def copilot_session(pid, start):
+    """Copilot 은 쓰고 있는 세션 폴더에 inuse.<pid>.lock 을 둔다. 번호가 재사용된 옛 잠금(프로그램보다 먼저 생긴 것)은 안 믿는다."""
+    hits = []
+    for f in glob.glob(os.path.join(COPILOT_HOME, 'session-state', '*', 'inuse.%d.lock' % pid)):
+        try:
+            if not start or os.path.getmtime(f) >= start - 5:
+                hits.append(os.path.dirname(f))
+        except OSError:
+            pass
+    return hits[0] if len(hits) == 1 else None
+
+
+def copilot_link(d):
+    """Copilot 기록은 세션마다 이름이 events.jsonl 로 같다. 보드는 파일 이름으로 세션을 가리므로 <세션id>.jsonl 링크를 만들어 쓴다."""
+    real = os.path.join(d, 'events.jsonl')
+    link = os.path.join(COPILOT_LINKS, os.path.basename(d) + '.jsonl')
+    if os.path.realpath(link) != os.path.realpath(real):
+        os.makedirs(COPILOT_LINKS, exist_ok=True)
+        try:
+            os.remove(link)
+        except OSError:
+            pass
+        os.symlink(real, link)
+    return link
+
+
+def is_copilot_log(path):
+    return bool(path) and os.path.dirname(path) == COPILOT_LINKS
+
+
+def copilot_name(log):
+    """세션 이름 (workspace.yaml 의 name)."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.realpath(log)), 'workspace.yaml'), encoding='utf-8') as f:
+            m = re.search(r'^name: (.+)$', f.read(), re.M)
+        return m.group(1).strip().strip('\'"') if m else ''
+    except OSError:
+        return ''
+
+
+@per_file
+def copilot_busy(path):
+    """마지막 사건으로 가른다: 요청·답 시작·도구 실행·권한 답 받음이면 일하는 중, 답을 마쳤거나(agentStop) 권한을 묻는 중이면 내 차례.
+    권한 훅(permissionRequest)은 자동 승인 때도 불려서 기다림 표시로 쓰지 않는다. 실제로 묻는 것은 permission.requested 다."""
+    busy = False
+    try:
+        with open(path, 'rb') as fh:
+            fh.seek(max(0, fh.seek(0, 2) - 300000))
+            for line in fh:
+                m = re.match(rb'\{"type":"([\w.]+)"', line)
+                kind = m.group(1) if m else b''
+                if kind in (b'user.message', b'assistant.turn_start', b'tool.execution_start', b'permission.completed'):
+                    busy = True
+                elif kind in (b'session.shutdown', b'abort', b'permission.requested'):
+                    busy = False
+                elif kind == b'hook.start' and b'"hookType":"agentStop"' in line:
+                    busy = False
+    except OSError:
+        pass
+    return busy
 
 
 OMP_STATE_DIR = os.path.expanduser('~/.spyhop/omp')
@@ -1041,6 +1112,16 @@ def agent_procs():
             a.update(log=f, how='claude:desktop-app' if a['desktop'] else 'claude:process')
         else:
             a['why'] = 'claude:transcript-not-written-yet'
+    # Copilot: 프로그램 번호가 적힌 잠금 파일 → 세션 폴더 → 기록 파일
+    for a in agents.values():
+        if a['kind'] != 'copilot':
+            continue
+        d = copilot_session(a['pid'], a['start'])
+        if d and os.path.exists(os.path.join(d, 'events.jsonl')):
+            log = copilot_link(d)
+            a.update(log=log, how='copilot:process', busy=copilot_busy(log), name=copilot_name(log))
+        else:
+            a['why'] = 'copilot:no-session-lock'
     # Codex: 열어 둔 기록 파일(프로그램 자신 또는 Codex 서버)이 후보다
     codex = [a for a in agents.values() if a['kind'] == 'codex']
     if codex:
@@ -1116,7 +1197,7 @@ def outside_terms():
             last = a['start'] * 1000
         t = {'handle': 'proc_%d' % a['pid'], 'title': a.get('name') or '', 'tabId': 'proc', 'leafId': str(a['pid']), 'worktreeId': wid,
              'worktreePath': cwd, 'ptyId': '', 'lastOutputAt': last, '_proc': a, '_ext': label}
-        if a['kind'] == 'claude' and 'busy' in a:
+        if a['kind'] in ('claude', 'copilot') and 'busy' in a:
             t['agent'] = {'state': 'working' if a['busy'] else 'done'}
         out.append(t)
     return out, wts
@@ -1225,6 +1306,8 @@ def _session_title(a):
         return codex_latest_names(a.get('codex_home')).get(m.group(1), '') if m else ''
     if a.get('kind') == 'omp':
         return omp_header(log).get('title', '')
+    if is_copilot_log(log):
+        return copilot_name(log)
     custom, auto = ai_title(log)
     return custom or auto or ''
 
@@ -1417,6 +1500,9 @@ def match_sessions(terms, worktrees):
             if kind == 'omp':
                 why(t, 'process-unresolved', kind='omp', reason='restart OMP after starting Spyhop to load its status extension')
                 continue
+            if kind == 'copilot':  # Copilot 은 실행 중인 프로그램으로만 찾는다 (제목으로 기록을 맞추지 않는다)
+                why(t, 'process-unresolved', kind='copilot', reason='no Copilot session lock for this pane yet')
+                continue
             if t.get('_pkind') == 'codex':  # 프로그램이 Codex 면 클로드 쪽 짝 맞추기는 하지 않는다
                 rest.append(t)
                 continue
@@ -1568,6 +1654,9 @@ def model_of(path):
             except (ValueError, AttributeError):
                 continue
         return pretty_model(model.split('/')[-1])
+    if is_copilot_log(path):  # Copilot: 마지막 답에 적힌 모델
+        ms = re.findall(r'^\{"type":"assistant\.message".*?"model":"([^"]+)"', tail, re.M)
+        return pretty_model(ms[-1]) if ms else ''
     if is_codex_log(path):  # Codex: 마지막 turn_context 의 모델. 한 번만 적혀 있으면 끝부분에 없으니 처음부터 한 줄씩 훑는다
         model = effort = ''
         lines = [l for l in tail.splitlines() if '"turn_context"' in l]
@@ -1753,7 +1842,7 @@ def status_of(t):
     if agent.get('state'):
         state = 'busy' if agent['state'] == 'working' else 'idle'
     proc = t.get('_proc') or {}
-    if proc.get('kind') in ('claude', 'omp') and 'busy' in proc:
+    if proc.get('kind') in ('claude', 'omp', 'copilot') and 'busy' in proc:
         # 클로드가 직접 적는 상태(~/.claude/sessions/<pid>.json)를 가장 믿는다. 오르카 쪽 표시는 끝난 뒤에도 working 으로 남을 때가 있다
         state = 'busy' if proc['busy'] else 'idle'
     if state == 'unknown' and is_codex_log(t.get('log')):
@@ -1785,6 +1874,8 @@ def last_turn(path):
         elif d.get('type') == 'message':  # OMP
             m = d.get('message', {})
             role, text = m.get('role'), text_of(m.get('content'))
+        elif d.get('type') in ('user.message', 'assistant.message'):  # Copilot
+            role, text = d['type'].split('.')[0], text_of((d.get('data') or {}).get('content'))
         else:
             continue
         text = (text or '').strip()
@@ -1815,9 +1906,11 @@ def turn_times(path):
         for line in f.read().decode('utf-8', 'ignore').splitlines():
             if '"timestamp"' not in line:
                 continue
-            ai = '"type":"assistant"' in line or '"role":"assistant"' in line or '"task_complete"' in line
+            ai = '"type":"assistant"' in line or '"role":"assistant"' in line or '"task_complete"' in line or \
+                 line.startswith('{"type":"assistant.turn_end"')  # Copilot
             user = ('"type":"user"' in line and '"tool_result"' not in line and '"isMeta":true' not in line) or \
-                   ('"role":"user"' in line and ('"input_text"' in line or '"type":"message"' in line))
+                   ('"role":"user"' in line and ('"input_text"' in line or '"type":"message"' in line)) or \
+                   line.startswith('{"type":"user.message"')  # Copilot
             if not (ai or user):
                 continue
             try:
@@ -2107,7 +2200,8 @@ def render(t, steps, ws):
     model = model_of(t.get('log')) if t.get('log') else model_from_screen(read_tail(t['handle']))
     sid_m = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$', t.get('log') or '')
     sid = sid_m.group(1) if sid_m else ''
-    resume = ('codex resume ' if is_codex_log(t.get('log')) else 'omp --resume ' if t.get('_pkind') == 'omp' else 'claude --resume ') + sid if sid else ''
+    resume = ('codex resume ' if is_codex_log(t.get('log')) else 'omp --resume ' if t.get('_pkind') == 'omp'
+              else 'copilot --resume=' if is_copilot_log(t.get('log')) else 'claude --resume ') + sid if sid else ''
     stale = ''
     e = steps.get('err') or ''
     ok = steps.get('ok_at')
@@ -2877,6 +2971,8 @@ def serve():
             return self.send(404, 'Unknown session'.encode())
         if omp_header(info.get('log') or ''):
             return self.send(409, 'OMP sessions can be grouped, but cannot be moved between workspaces yet.'.encode())
+        if is_copilot_log(info.get('log') or ''):
+            return self.send(409, 'Copilot sessions can be grouped, but cannot be moved between workspaces yet.'.encode())
         if info['handle'].startswith('proc_'):
             return self.send(409, 'This session runs outside Orca, so it cannot be moved.'.encode())
         if info['status'] != 'wait':
