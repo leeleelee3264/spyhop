@@ -1300,7 +1300,7 @@ def focus_claude_app(kind='code', session=None):
     if kind == 'code' and session and winplat.open_claude_session(session):
         return 'session'
     ok = winplat.focus_codex_app() if kind == 'codex-app' else winplat.focus_desktop_app()
-    return 'desktop' if ok else ''
+    return 'desktop' if ok else 'blocked'  # 창은 있는데 Windows 가 앞으로 못 올리게 막았다
 
 
 def outside_terms():
@@ -4245,6 +4245,7 @@ function setSum(v){fetch('http://127.0.0.1:47613/config?k=__TOKEN__',{method:'PO
 function go(h){fetch('http://127.0.0.1:47613/switch?h='+encodeURIComponent(h))
   .then(function(r){return r.text()}).then(function(t){toast(t==='pane'?'Switched to the Orca pane':t==='tab'?'Switched to the terminal tab':
     t==='session'?'Opened that session in the Claude app':t==='desktop'?'Brought the app to the front · pick the session there':
+    t==='blocked'?'Windows did not let Spyhop bring the app to the front · open it from the taskbar':
     t==='app'?'Opened the terminal app · could not find the exact tab':'Could not find that session’s window')}).catch(function(){toast('Board server is not running · restart it with spyhop.cmd')})}
 // 칸이 화면 높이를 넘으면 그 칸의 카드를 아래쪽부터 한 장씩, 덜 중요한 것부터 줄인다.
 // 줄이는 순서: 요약 빼기 → 마지막 답 빼기 → 단계를 막대로 → 제목 1줄. 단계가 이 보드의 핵심이라 가장 늦게 줄인다.

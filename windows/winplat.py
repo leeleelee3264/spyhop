@@ -361,6 +361,32 @@ u32.IsIconic.argtypes = [W.HWND]
 u32.ShowWindow.argtypes = [W.HWND, ctypes.c_int]
 u32.SetForegroundWindow.argtypes = [W.HWND]
 u32.keybd_event.argtypes = [W.BYTE, W.BYTE, W.DWORD, ctypes.c_size_t]
+u32.GetForegroundWindow.restype = W.HWND
+u32.AttachThreadInput.argtypes = [W.DWORD, W.DWORD, W.BOOL]
+u32.BringWindowToTop.argtypes = [W.HWND]
+k32.GetCurrentThreadId.restype = W.DWORD
+
+
+def force_foreground(hwnd):
+    """창을 맨 앞으로. 성공하면 True.
+    보드 서버·트레이는 백그라운드 프로그램이라 Windows 가 다른 창을 앞으로 못 올리게 막는다(SetForegroundWindow 가
+    성공이라 답해도 작업 표시줄만 깜빡이고 그대로일 때가 있다). 지금 맨 앞 창의 입력 줄에 잠깐 붙어서(AttachThreadInput)
+    올리고, Alt 를 한 번 눌렀다 떼서(그래야 허용된다) 같이 시도한 뒤, 실제로 맨 앞이 됐는지 확인한다."""
+    if u32.IsIconic(hwnd):
+        u32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    fg = u32.GetForegroundWindow()
+    mine = k32.GetCurrentThreadId()
+    theirs = u32.GetWindowThreadProcessId(fg, None) if fg else 0
+    attached = bool(theirs and theirs != mine and u32.AttachThreadInput(mine, theirs, True))
+    try:
+        u32.keybd_event(0x12, 0, 0, 0)
+        u32.keybd_event(0x12, 0, 2, 0)
+        u32.BringWindowToTop(hwnd)
+        u32.SetForegroundWindow(hwnd)
+    finally:
+        if attached:
+            u32.AttachThreadInput(mine, theirs, False)
+    return u32.GetForegroundWindow() == hwnd
 
 
 def _top_windows():
@@ -380,25 +406,14 @@ def _top_windows():
 def focus(pid):
     """세션이 도는 창(가장 가까운 창 있는 조상)을 앞으로. 탭까지는 못 고른다 → 'app' 또는 ''."""
     _, hwnd = window_host(pid)
-    if not hwnd:
-        return ''
-    if u32.IsIconic(hwnd):
-        u32.ShowWindow(hwnd, 9)  # SW_RESTORE
-    # 백그라운드 프로그램은 다른 창을 앞으로 못 올린다. Alt 를 한 번 눌렀다 떼면 허용된다(널리 쓰는 방법)
-    u32.keybd_event(0x12, 0, 0, 0)
-    u32.keybd_event(0x12, 0, 2, 0)
-    return 'app' if u32.SetForegroundWindow(hwnd) else ''
+    return 'app' if hwnd and force_foreground(hwnd) else ''
 
 
 def focus_desktop_app():
     """Claude 데스크톱 앱 창을 앞으로. 'app' 또는 ''."""
     for pid, hwnd in _top_windows().items():
         if is_desktop_app(exe_path(pid)):
-            if u32.IsIconic(hwnd):
-                u32.ShowWindow(hwnd, 9)  # SW_RESTORE
-            u32.keybd_event(0x12, 0, 0, 0)
-            u32.keybd_event(0x12, 0, 2, 0)
-            return 'app' if u32.SetForegroundWindow(hwnd) else ''
+            return 'app' if force_foreground(hwnd) else ''
     return ''
 
 
@@ -426,11 +441,7 @@ def focus_codex_app():
     for pid, hwnd in _top_windows().items():
         path = exe_path(pid)
         if os.path.basename(path).lower() == 'chatgpt.exe' or '\\OpenAI.Codex_' in path:
-            if u32.IsIconic(hwnd):
-                u32.ShowWindow(hwnd, 9)  # SW_RESTORE
-            u32.keybd_event(0x12, 0, 0, 0)
-            u32.keybd_event(0x12, 0, 2, 0)
-            return 'app' if u32.SetForegroundWindow(hwnd) else ''
+            return 'app' if force_foreground(hwnd) else ''
     return ''
 
 
