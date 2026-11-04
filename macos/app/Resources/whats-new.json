@@ -1,38 +1,17 @@
 {
   "newFeatures": [
     {
-      "title": "Claude app sessions on the board",
-      "detail": "See local Code sessions from the Claude desktop app in a folder-based Claude App column. Go to session opens the matching session and brings Claude forward."
+      "title": "GitHub Copilot CLI sessions on the board",
+      "detail": "Running copilot sessions show up on their own, with steps, model, session name and a resume command. Moving them between Orca workspaces is not supported yet."
     },
     {
-      "title": "cmux session support",
-      "detail": "See cmux sessions together by folder. Go to session selects the matching workspace and terminal surface, then brings cmux forward."
+      "title": "Signal themes",
+      "detail": "Signal Light and Signal Dark replace Vitesse Light and Ayu Dark. My turn is red and Working is cyan, so the two are easier to tell apart. If you used a replaced theme, you move to Signal automatically."
     },
     {
-      "title": "Update from the Spyhop menu",
-      "detail": "Choose Check for Updates… to review a new version’s complete release notes. Update and restart installs it and reopens Spyhop automatically."
-    },
-    {
-      "title": "Release notes after each update",
-      "detail": "The version you just installed introduces all of its New Features and Fixes once. Release Notes in the Spyhop menu opens the latest published notes."
+      "title": "A smaller theme picker with a preview",
+      "detail": "Settings now has a Light and Dark toggle, a short list of names and a card preview. Hover a theme to preview it, click to apply."
     }
   ],
-  "fixes": [
-    {
-      "title": "Orca folder workspaces get their own columns",
-      "detail": "Sessions in Orca workspaces made from a folder now appear under that workspace's name, instead of all sharing one unnamed column."
-    },
-    {
-      "title": "Close update windows by clicking outside",
-      "detail": "Update available and What's new close when you click outside them, like other windows on the board. They stay open while an update is being prepared."
-    },
-    {
-      "title": "Orca sessions with the Orca app from the DMG",
-      "detail": "Spyhop now finds the Orca CLI inside Orca.app, so sessions in Orca show up even when the CLI is not registered. If Orca still cannot be reached, those sessions appear as regular terminal cards instead of disappearing."
-    },
-    {
-      "title": "What's new appears once",
-      "detail": "This window counts as seen as soon as it opens, so it does not come back on the next launch if you quit Spyhop without closing it."
-    }
-  ]
+  "fixes": []
 }
