@@ -3633,8 +3633,8 @@ THEMES = [
                                     done='#50a14f', now='#c18401', left='#d4d4d8', wait='#4078f2', busy='#a626a4', side='#e45649')),
     ('ayu-light', 'Ayu Light', dict(bg='#f3f4f5', col='#e8eaec', card='#fcfcfc', line='rgba(92,97,102,.14)', ink='#3a3f45', ink2='#5c6166', ink3='#8a9199',
                                     done='#6c9a00', now='#e59400', left='#d8dbde', wait='#399ee6', busy='#a37acc', side='#f07171')),
-    ('vitesse-light', 'Vitesse Light', dict(bg='#f7f7f7', col='#eeeeee', card='#ffffff', line='rgba(57,58,52,.12)', ink='#393a34', ink2='#5e5f58', ink3='#999990',
-                                            done='#1e754f', now='#b07d00', left='#dadad5', wait='#296aa3', busy='#a65e2b', side='#ab5959')),
+    ('signal-light', 'Signal Light', dict(bg='#f5f6f8', col='#eaecf0', card='#ffffff', line='rgba(20,24,32,.13)', ink='#1b1f26', ink2='#454d5a', ink3='#6b7380',
+                                          done='#1a7f37', now='#334155', left='#d3d8de', wait='#c81e1e', busy='#0a7ea4', side='#7c3aed')),
     ('github-dark', 'GitHub Dark', dict(bg='#0d1117', col='#161b22', card='#21262d', line='rgba(240,246,252,.1)', ink='#e6edf3', ink2='#c9d1d9', ink3='#8b949e',
                                         done='#3fb950', now='#d29922', left='#30363d', wait='#4493f8', busy='#a371f7', side='#db61a2')),
     ('vscode-dark', 'VS Code Dark', dict(bg='#181818', col='#1f1f1f', card='#2b2b2b', line='rgba(255,255,255,.09)', ink='#e8e8e8', ink2='#cccccc', ink3='#9d9d9d',
@@ -3643,13 +3643,14 @@ THEMES = [
                                   done='#98c379', now='#e5c07b', left='#3e4451', wait='#61afef', busy='#c678dd', side='#e06c75')),
     ('vitesse-dark', 'Vitesse Dark', dict(bg='#121212', col='#181818', card='#222222', line='rgba(222,220,213,.1)', ink='#e2ded3', ink2='#bfbaaa', ink3='#7c7c78',
                                           done='#4d9375', now='#e6cc77', left='#333333', wait='#6394bf', busy='#d4976c', side='#cb7676')),
-    ('ayu-dark', 'Ayu Dark', dict(bg='#0b0e14', col='#0f131a', card='#171b24', line='rgba(191,189,182,.1)', ink='#e6e4dc', ink2='#bfbdb6', ink3='#6c7380',
-                                  done='#aad94c', now='#ffb454', left='#2d3640', wait='#59c2ff', busy='#d2a6ff', side='#f07178')),
+    ('signal-dark', 'Signal Dark', dict(bg='#0e1013', col='#15181d', card='#1d2127', line='rgba(230,235,245,.1)', ink='#eef1f5', ink2='#c4cad3', ink3='#8a93a0',
+                                        done='#3fcf8e', now='#f5d547', left='#363c45', wait='#ff5a52', busy='#22d3ee', side='#a78bfa')),
 ]
-DARK_THEMES = {'github-dark', 'vscode-dark', 'one-dark', 'vitesse-dark', 'ayu-dark'}
+DARK_THEMES = {'github-dark', 'vscode-dark', 'one-dark', 'vitesse-dark', 'signal-dark'}
 OLD_THEMES = {'dark': 'github-dark', 'bluegrey': 'github-dark', 'indigo': 'github-light', 'teal': 'github-light', 'purple': 'one-light',  # 예전 머티리얼 테마를 고른 사람
-              'latte': 'one-light', 'solarized-light': 'ayu-light', 'rose-pine-dawn': 'vitesse-light',  # 2026-10 에 뺀 테마
-              'mocha': 'vscode-dark', 'tokyo': 'ayu-dark', 'dracula': 'vitesse-dark', 'nord': 'github-dark'}
+              'latte': 'one-light', 'solarized-light': 'ayu-light', 'rose-pine-dawn': 'signal-light',  # 2026-10 에 뺀 테마
+              'mocha': 'vscode-dark', 'tokyo': 'signal-dark', 'dracula': 'vitesse-dark', 'nord': 'github-dark',
+              'vitesse-light': 'signal-light', 'ayu-dark': 'signal-dark'}  # 2026-11 에 Signal 로 바꾼 자리
 # 미리보기 카드에서만 쓰는 클래식 색 (실제 클래식은 :root 기본값 + 시스템 다크 모드)
 CLASSIC_PREVIEW = ('.thp[data-theme="classic"]{--bg:#f4f5f8;--col:#ebecf0;--card:#fff;--line:rgba(20,24,40,.12);--ink:#172b4d;--ink2:#44546f;'
                    '--ink3:#8590a2;--done:#5cb88f;--now:#d9a944;--left:#c9ced8;--wait:#3fa877;--busy:#e283b0}')
