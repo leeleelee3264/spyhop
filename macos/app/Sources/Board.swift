@@ -131,12 +131,12 @@ enum Board {
         a.compare(b, options: .numeric) == .orderedDescending
     }
 
-    /// 메뉴바가 하던 일: 감시가 꺼져 있을 때 Claude·Codex·OMP 가 떠 있으면 다시 켤 이유가 있다
+    /// 메뉴바가 하던 일: 감시가 꺼져 있을 때 Claude·Codex·Copilot·OMP 가 떠 있으면 다시 켤 이유가 있다
     static func agentsRunning() -> Bool {
         for line in (output("/bin/ps", ["-axo", "comm="]) ?? "").split(separator: "\n") {
             let comm = String(line)
             let name = (comm as NSString).lastPathComponent
-            if name == "claude" || name == "codex" || comm.range(of: #"/claude/versions/\d[\w.-]*$"#, options: .regularExpression) != nil {
+            if name == "claude" || name == "codex" || name == "copilot" || comm.range(of: #"/claude/versions/\d[\w.-]*$"#, options: .regularExpression) != nil {
                 return true
             }
         }

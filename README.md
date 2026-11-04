@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>See which of your AI coding sessions is waiting for you.</b><br>
-  <sub>Spyhop puts every Claude Code, Codex and OMP session on one board, with how far each one has come: done, now, next.</sub>
+  <sub>Spyhop puts every Claude Code, Codex, GitHub Copilot CLI and OMP session on one board, with how far each one has come: done, now, next.</sub>
 </p>
 
 <p align="center">

@@ -56,6 +56,10 @@ Open **Settings → Summarizer** and pick a `claude` or `codex` model. Transcrip
 
 Start OMP once after installing Spyhop, open Spyhop, then restart your OMP sessions so they load the bundled status extension. Moving OMP sessions between Orca workspaces is not supported yet. Details are under [OMP](#omp) in Reference.
 
+### Add GitHub Copilot CLI sessions
+
+Nothing to set up: running `copilot` sessions show up on their own. Moving Copilot sessions between Orca workspaces is not supported yet. Details are under [GitHub Copilot CLI](#github-copilot-cli) in Reference.
+
 ### Move a session to another Orca workspace
 
 Drag its card to another column. The Orca pane moves there and the conversation continues in its original folder. Only sessions showing **My turn** can be moved, and only inside Orca.
@@ -104,13 +108,17 @@ cmux: in **Settings → Automation → Socket Control Mode**, select **Automatio
 
 The status extension is installed at `~/.omp/agent/extensions/spyhop-status.ts` when the OMP agent directory exists (or `PI_CODING_AGENT_DIR` when set for `spyhop`). OMP must allow its normal extension discovery. It records only PID, process start time, session ID, transcript path, folder and busy/idle state in `~/.spyhop/omp/`. Tested with Oh My Pi 18.12.2.
 
+### GitHub Copilot CLI
+
+Spyhop finds each running `copilot` program through the `inuse.<pid>.lock` file Copilot keeps in its session folder under `~/.copilot/session-state/`, and reads that session's `events.jsonl`. Because every Copilot transcript has the same file name, Spyhop keeps a link named after the session ID in `~/.spyhop/copilot/`. A session waiting for your permission counts as your turn. Tested with Copilot CLI 1.0.105.
+
 ### Files
 
 Settings and topic groups live in `~/.spyhop`; summaries and board state in `/tmp/progress-board/`. More in [docs/details.md](details.md#at-a-glance).
 
 ## How it works
 
-- **Finding sessions.** Spyhop looks at the running `claude`, `codex` and OMP programs, so sessions show up wherever you start them. Orca, when present, adds exact panes, workspaces and cross-check links.
+- **Finding sessions.** Spyhop looks at the running `claude`, `codex`, `copilot` and OMP programs, so sessions show up wherever you start them. Orca, when present, adds exact panes, workspaces and cross-check links.
 - **Summaries.** Only sessions whose transcript changed are summarized, at most once a minute each (every 3 or 5 minutes at the 30 s or 60 s update interval), and only the new part is sent. Idle sessions cost nothing. Measured over 30 minutes with 6 sessions open: 53 summarizer calls, about 4,500 characters each.
 - **Privacy.** The only thing that leaves your Mac is the transcript, sent to the summarizer model you picked, with anything that looks like a key or password masked first.
 - **Updates.** Spyhop checks for stable releases, shows a single update notice, and lets you review the offered version’s complete release notes before installing. It reopens automatically after installation. After an upgrade, the installed version’s New Features and Fixes appear once.
