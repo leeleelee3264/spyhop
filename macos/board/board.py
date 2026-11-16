@@ -2293,6 +2293,16 @@ def render(t, steps, ws):
                   'model': model, 'since': since, 'handle': t['handle'], 'pane': t['paneKey'], 'order': order, 'helpers': helpers,
                   'summary': steps.get('summary') or '',
                   'note': '' if flow else ('Summarizing…' if t.get('log') else 'Transcript not found'), 'steps': [{'label': f['label'], 'state': f['state']} for f in flow]}
+    # 오르카 사이드바 플러그인용: 보드 상세 창에 보이는 것을 그대로 넘긴다(메뉴바 패널은 이 칸들을 안 읽는다)
+    mine = load_overrides().get(os.path.basename(t.get('log') or ''), {})
+    t['_info'].update({
+        'where': where, 'sid': sid, 'resume': resume,
+        'steps': [{'label': f['label'], 'state': f['state'], 'detail': f.get('detail') or ''} for f in flow],
+        'todo': [{'label': i.get('label', ''), 'state': mine.get(i.get('label', '')) or i.get('state')} for i in items],
+        'ask': (dg.get('ask') or '')[:200],
+        'reply': steps.get('last_reply') or dg['recap'] or '',
+        'full': (dg.get('full') or '\n'.join(dg.get('block') or []))[:6000],
+        'subs': [{'handle': h, 'state': sst, 'who': who, 'what': what, 'result': (res or what)[:320]} for h, sst, who, what, res in subs]})
     return order, card, modal
 
 
@@ -2593,7 +2603,7 @@ def _build():
     t = current_theme()
     # version: 앱이 업데이트 뒤 「어디서 올라왔는지」를 적을 때, appearance: 앱 창 제목줄을 테마 밝기에 맞출 때 쓴다
     save_json(STATE, {'at': time.time(), 'version': VERSION, 'appearance': 'dark' if t in DARK_THEMES else 'system' if t == 'classic' else 'light',
-                      'sessions': infos})
+                      'group_by': mode, 'sort': sort, 'sessions': infos})
     try:  # 진단 기록은 보드와 상태를 다 쓴 뒤에 남긴다. 여기서 실패해도 보드는 그대로 간다
         save_json(TRACE, {'at': time.time(), 'code': trace['code'], 'inputs': trace['inputs'], 'panes': [x['_tr'] for x in trace['raw']]})
     except Exception as e:
