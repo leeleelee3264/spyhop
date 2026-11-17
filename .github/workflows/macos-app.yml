@@ -13,7 +13,7 @@ permissions:
 jobs:
   build:
     if: github.event_name == 'pull_request'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,7 +39,7 @@ jobs:
 
   release:
     if: github.event_name == 'release'
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: write  # 릴리즈에 DMG 를 붙이는 데만 쓴다
     steps:
