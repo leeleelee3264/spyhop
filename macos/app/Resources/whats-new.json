@@ -1,16 +1,8 @@
 {
   "newFeatures": [
     {
-      "title": "GitHub Copilot CLI sessions on the board",
-      "detail": "Running copilot sessions show up on their own, with steps, model, session name and a resume command. Moving them between Orca workspaces is not supported yet."
-    },
-    {
-      "title": "Signal themes",
-      "detail": "Signal Light and Signal Dark replace Vitesse Light and Ayu Dark. My turn is red and Working is cyan, so the two are easier to tell apart. If you used a replaced theme, you move to Signal automatically."
-    },
-    {
-      "title": "A smaller theme picker with a preview",
-      "detail": "Settings now has a Light and Dark toggle, a short list of names and a card preview. Hover a theme to preview it, click to apply."
+      "title": "Spyhop in the Orca sidebar",
+      "detail": "Install the Spyhop plugin for Orca to see the same board in Orca's right sidebar: whose turn it is, steps, TODO and the last reply. Run: orca plugin install leeleelee3264/spyhop-orca"
     }
   ],
   "fixes": []
