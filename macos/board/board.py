@@ -2603,7 +2603,7 @@ def _build():
     t = current_theme()
     # version: 앱이 업데이트 뒤 「어디서 올라왔는지」를 적을 때, appearance: 앱 창 제목줄을 테마 밝기에 맞출 때 쓴다
     save_json(STATE, {'at': time.time(), 'version': VERSION, 'appearance': 'dark' if t in DARK_THEMES else 'system' if t == 'classic' else 'light',
-                      'group_by': mode, 'sort': sort, 'sessions': infos})
+                      'group_by': mode, 'sort': sort, 'workspaces': json.loads(wslist), 'sessions': infos})  # workspaces: 플러그인이 「다른 워크스페이스로 옮기기」 목록을 그릴 때 쓴다
     try:  # 진단 기록은 보드와 상태를 다 쓴 뒤에 남긴다. 여기서 실패해도 보드는 그대로 간다
         save_json(TRACE, {'at': time.time(), 'code': trace['code'], 'inputs': trace['inputs'], 'panes': [x['_tr'] for x in trace['raw']]})
     except Exception as e:
